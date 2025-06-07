@@ -14,8 +14,10 @@ dependencies:
   - openff-interchange-base >=0.3.17
 
   - pytorch
-  - pydantic
   - nnpops
+
+  - pydantic
+  - pydantic-units
 
   - networkx
 
@@ -29,6 +31,10 @@ dependencies:
   - numpy
   - msgpack-python
 
+  # FE simulations
+  - mdtraj
+  - absolv >=1.0.1
+
   # Examples
   - jupyter
   - nbconvert
@@ -40,13 +46,10 @@ dependencies:
   - scipy  # test logsumexp implementation
   - smirnoff-plugins
 
-  - versioneer
+  - setuptools_scm >=8
 
   - pre-commit
-  - isort
-  - black
-  - flake8
-  - flake8-pyproject
+  - ruff
   - nbqa
 
   - pytest
@@ -56,12 +59,13 @@ dependencies:
   - codecov
 
   # Docs
-  - mkdocs <1.6
+  - mkdocs
   - mkdocs-material
   - mkdocs-gen-files
   - mkdocs-literate-nav
   - mkdocs-jupyter
   - mkdocstrings
-  - mkdocstrings-python
+  - mkdocstrings-python >=1.10.8
+  - griffe-pydantic
   - black
   - mike

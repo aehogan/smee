@@ -117,12 +117,15 @@ def _build_vdw_lookup(
     for i, j in itertools.product(range(n_params), range(n_params)):
         if (i, j) in exceptions:
             parameters = {
-                col: potential.parameters[exceptions[i, j], col_idx]
+                col: potential.parameters[exceptions[i, j], col_idx].detach()
                 for col, col_idx in parameter_col_to_idx.items()
             }
         else:
             parameters = _eval_mixing_fn(
-                potential, mixing_fn, potential.parameters[i], potential.parameters[j]
+                potential,
+                mixing_fn,
+                potential.parameters[i].detach(),
+                potential.parameters[j].detach(),
             )
 
         unit_conversion = {
@@ -132,7 +135,7 @@ def _build_vdw_lookup(
             for col, col_idx in parameter_col_to_idx.items()
         }
 
-        for col, col_idx in parameter_col_to_idx.items():
+        for col in parameter_col_to_idx:
             parameter_lookup[col][i + j * n_params] = float(
                 parameters[col] * unit_conversion[col]
             )
@@ -169,7 +172,7 @@ def _detect_parameters(
             assigned_vars.add(assigned_var.strip())
 
         parsed_fn = symengine.sympify(line)
-        free_vars.update(set(str(x) for x in parsed_fn.free_symbols) - assigned_vars)
+        free_vars.update({str(x) for x in parsed_fn.free_symbols} - assigned_vars)
 
     for assigned_var, fn in mixing_fn.items():
         fn = fn.strip().strip(";")
@@ -180,7 +183,7 @@ def _detect_parameters(
         assigned_vars.add(assigned_var.strip())
 
         parsed_fn = symengine.sympify(fn)
-        free_vars.update(set(str(x) for x in parsed_fn.free_symbols) - assigned_vars)
+        free_vars.update({str(x) for x in parsed_fn.free_symbols} - assigned_vars)
 
     free_vars -= assigned_vars
 
@@ -257,9 +260,9 @@ def _add_parameters_to_vdw_without_lookup(
 
     idx_offset = 0
 
-    for topology, n_copies in zip(system.topologies, system.n_copies):
+    for topology, n_copies in zip(system.topologies, system.n_copies, strict=True):
         parameter_map = topology.parameters[potential.type]
-        parameters = parameter_map.assignment_matrix @ potential.parameters
+        parameters = parameter_map.assignment_matrix @ potential.parameters.detach()
 
         for _ in range(n_copies):
             for parameter in parameters:
@@ -317,7 +320,7 @@ def _add_parameters_to_vdw_with_lookup(
 
     idx_offset = 0
 
-    for topology, n_copies in zip(system.topologies, system.n_copies):
+    for topology, n_copies in zip(system.topologies, system.n_copies, strict=True):
         parameter_map = topology.parameters[potential.type]
 
         assignment_dense = parameter_map.assignment_matrix.to_dense()
@@ -463,9 +466,9 @@ def convert_lj_potential(
 
     idx_offset = 0
 
-    for topology, n_copies in zip(system.topologies, system.n_copies):
+    for topology, n_copies in zip(system.topologies, system.n_copies, strict=True):
         parameter_map = topology.parameters[potential.type]
-        parameters = parameter_map.assignment_matrix @ potential.parameters
+        parameters = parameter_map.assignment_matrix @ potential.parameters.detach()
 
         for _ in range(n_copies):
             for epsilon, sigma in parameters:
@@ -660,9 +663,9 @@ def convert_coulomb_potential(
 
     idx_offset = 0
 
-    for topology, n_copies in zip(system.topologies, system.n_copies):
+    for topology, n_copies in zip(system.topologies, system.n_copies, strict=True):
         parameter_map = topology.parameters[potential.type]
-        parameters = parameter_map.assignment_matrix @ potential.parameters
+        parameters = parameter_map.assignment_matrix @ potential.parameters.detach()
 
         for _ in range(n_copies):
             for charge in parameters:

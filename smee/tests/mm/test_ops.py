@@ -86,7 +86,7 @@ def test_pack_unpack_force_field(mocker):
     expected_v_site = updated_tensors[-1]
 
     for i, (original, unpacked) in enumerate(
-        zip(force_field.potentials, unpacked_force_field.potentials)
+        zip(force_field.potentials, unpacked_force_field.potentials, strict=True)
     ):
         assert original.type == unpacked.type
         assert original.fn == unpacked.fn
@@ -238,7 +238,7 @@ def test_compute_observables(tmp_path, mock_argon_tensors, mock_argon_params):
     frames_path = tmp_path / ("frames.msgpack")
 
     with frames_path.open("wb") as file:
-        for coord, box_vector in zip(coords, box_vectors):
+        for coord, box_vector in zip(coords, box_vectors, strict=True):
             frame = (
                 torch.tensor(coord).float(),
                 torch.tensor(box_vector).float(),
@@ -252,9 +252,9 @@ def test_compute_observables(tmp_path, mock_argon_tensors, mock_argon_params):
     beta = 2.0
 
     expected_du_d_eps = 4.0 * ((sig / distances) ** 12 - (sig / distances) ** 6)
-    expected_du_d_sig = (
-        eps * (sig**5) * (48.0 * (sig**6) - 24.0 * distances**6)
-    ) / (distances**12)
+    expected_du_d_sig = (eps * (sig**5) * (48.0 * (sig**6) - 24.0 * distances**6)) / (
+        distances**12
+    )
 
     expected_potential = eps * expected_du_d_eps
 
@@ -433,3 +433,73 @@ def test_reweight_ensemble_averages(mocker, tmp_path, mock_argon_tensors):
 
         assert reweight_grad.shape == ensemble_grad.shape
         assert torch.allclose(reweight_grad, ensemble_grad)
+
+
+def test_compute_dg_solv(mocker, tmp_path, mock_argon_tensors):
+    tensor_ff, tensor_top = mock_argon_tensors
+
+    params = tensor_ff.potentials_by_type["vdW"].parameters
+    params.requires_grad = True
+
+    mocker.patch(
+        "smee.mm._fe.compute_dg_and_grads",
+        side_effect=[
+            (torch.tensor(1.0).double(), (torch.tensor([[2.0, 3.0]]).double(),)),
+            (torch.tensor(4.0).double(), (torch.tensor([[5.0, 6.0]]).double(),)),
+        ],
+    )
+
+    dg = smee.mm.compute_dg_solv(tensor_top, None, tensor_top, tensor_ff, tmp_path)
+    dg_dtheta = torch.autograd.grad(dg, params)[0]
+
+    assert torch.isclose(dg, torch.tensor(-3.0).double())
+    assert torch.allclose(dg_dtheta, torch.tensor([[3.0, 3.0]]).double())
+
+
+def test_reweight_dg_solv(mocker, tmp_path, mock_argon_tensors):
+    tensor_ff, tensor_top = mock_argon_tensors
+
+    params = tensor_ff.potentials_by_type["vdW"].parameters
+    params.requires_grad = True
+
+    mocker.patch(
+        "smee.mm._fe.reweight_dg_and_grads",
+        side_effect=[
+            (torch.tensor(1.0).double(), (torch.tensor([[2.0, 3.0]]).double(),), 4.0),
+            (torch.tensor(5.0).double(), (torch.tensor([[6.0, 7.0]]).double(),), 8.0),
+        ],
+    )
+
+    dg_0 = torch.tensor(-3.0).double()
+
+    dg, n_eff = smee.mm.reweight_dg_solv(
+        tensor_top, None, tensor_top, tensor_ff, tmp_path, dg_0, 3
+    )
+    dg_dtheta = torch.autograd.grad(dg, params)[0]
+
+    assert torch.isclose(dg, torch.tensor(1.0).double())
+    assert torch.allclose(dg_dtheta, torch.tensor([[4.0, 4.0]]).double())
+
+    assert n_eff == 4.0
+
+
+def test_reweight_dg_solv_error(mocker, tmp_path, mock_argon_tensors):
+    tensor_ff, tensor_top = mock_argon_tensors
+
+    params = tensor_ff.potentials_by_type["vdW"].parameters
+    params.requires_grad = True
+
+    mocker.patch(
+        "smee.mm._fe.reweight_dg_and_grads",
+        side_effect=[
+            (torch.tensor(1.0).double(), (torch.tensor([[2.0, 3.0]]).double(),), 4.0),
+            (torch.tensor(5.0).double(), (torch.tensor([[6.0, 7.0]]).double(),), 8.0),
+        ],
+    )
+
+    dg_0 = torch.tensor(-3.0).double()
+
+    with pytest.raises(smee.mm.NotEnoughSamplesError):
+        smee.mm.reweight_dg_solv(
+            tensor_top, None, tensor_top, tensor_ff, tmp_path, dg_0, 100
+        )

@@ -21,15 +21,15 @@ def convert_bond_potential(
 
     idx_offset = 0
 
-    for topology, n_copies in zip(system.topologies, system.n_copies):
+    for topology, n_copies in zip(system.topologies, system.n_copies, strict=True):
         parameters = (
             topology.parameters[potential.type].assignment_matrix @ potential.parameters
-        )
+        ).detach()
 
         for _ in range(n_copies):
             atom_idxs = topology.parameters[potential.type].particle_idxs + idx_offset
 
-            for (i, j), (constant, length) in zip(atom_idxs, parameters):
+            for (i, j), (constant, length) in zip(atom_idxs, parameters, strict=True):
                 force.addBond(
                     i,
                     j,
@@ -53,15 +53,15 @@ def _convert_angle_potential(
 
     idx_offset = 0
 
-    for topology, n_copies in zip(system.topologies, system.n_copies):
+    for topology, n_copies in zip(system.topologies, system.n_copies, strict=True):
         parameters = (
             topology.parameters[potential.type].assignment_matrix @ potential.parameters
-        )
+        ).detach()
 
         for _ in range(n_copies):
             atom_idxs = topology.parameters[potential.type].particle_idxs + idx_offset
 
-            for (i, j, k), (constant, angle) in zip(atom_idxs, parameters):
+            for (i, j, k), (constant, angle) in zip(atom_idxs, parameters, strict=True):
                 force.addAngle(
                     i,
                     j,
@@ -89,22 +89,25 @@ def convert_torsion_potential(
 
     idx_offset = 0
 
-    for topology, n_copies in zip(system.topologies, system.n_copies):
+    for topology, n_copies in zip(system.topologies, system.n_copies, strict=True):
         parameters = (
             topology.parameters[potential.type].assignment_matrix @ potential.parameters
-        )
+        ).detach()
 
         for _ in range(n_copies):
             atom_idxs = topology.parameters[potential.type].particle_idxs + idx_offset
 
-            for (i, j, k, l), (constant, periodicity, phase, idivf) in zip(
-                atom_idxs, parameters
-            ):
+            for (idx_i, idx_j, idx_k, idx_l), (
+                constant,
+                periodicity,
+                phase,
+                idivf,
+            ) in zip(atom_idxs, parameters, strict=True):
                 force.addTorsion(
-                    i,
-                    j,
-                    k,
-                    l,
+                    idx_i,
+                    idx_j,
+                    idx_k,
+                    idx_l,
                     int(periodicity),
                     phase * _RADIANS,
                     constant / idivf * _KCAL_PER_MOL,

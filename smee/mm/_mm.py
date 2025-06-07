@@ -12,13 +12,12 @@ import numpy
 import openmm.app
 import openmm.unit
 import torch
-from rdkit import Chem
-from rdkit.Chem import AllChem
 
 import smee
 import smee.converters
 import smee.mm._config
 import smee.mm._reporters
+import smee.mm._utils
 
 _LOGGER = logging.getLogger("smee.mm")
 
@@ -42,7 +41,9 @@ def _apply_hmr(
 
     idx_offset = 0
 
-    for topology, n_copies in zip(system_smee.topologies, system_smee.n_copies):
+    for topology, n_copies in zip(
+        system_smee.topologies, system_smee.n_copies, strict=True
+    ):
         for _ in range(n_copies):
             for idx_a, idx_b in topology.bond_idxs:
                 if topology.atomic_nums[idx_a] == 1:
@@ -71,32 +72,11 @@ def _apply_hmr(
             idx_offset += topology.n_particles
 
 
-def _topology_to_rdkit(topology: smee.TensorTopology) -> Chem.Mol:
-    """Convert a topology to an RDKit molecule."""
-    mol = Chem.RWMol()
-
-    for atomic_num, formal_charge in zip(topology.atomic_nums, topology.formal_charges):
-        atom = Chem.Atom(int(atomic_num))
-        atom.SetFormalCharge(int(formal_charge))
-        mol.AddAtom(atom)
-
-    for bond_idxs, bond_order in zip(topology.bond_idxs, topology.bond_orders):
-        idx_a, idx_b = int(bond_idxs[0]), int(bond_idxs[1])
-        mol.AddBond(idx_a, idx_b, Chem.BondType(bond_order))
-
-    mol = Chem.Mol(mol)
-    mol.UpdatePropertyCache()
-
-    AllChem.EmbedMolecule(mol)
-
-    return mol
-
-
 def _topology_to_xyz(
     topology: smee.TensorTopology, force_field: smee.TensorForceField | None
 ) -> str:
     """Convert a topology to an RDKit molecule."""
-    mol = _topology_to_rdkit(topology)
+    mol = smee.mm._utils.topology_to_rdkit(topology)
 
     elements = [atom.GetSymbol() for atom in mol.GetAtoms()]
     coords = torch.tensor(mol.GetConformer().GetPositions())
@@ -114,7 +94,7 @@ def _topology_to_xyz(
             "",
             *[
                 f"{element} {x:f} {y:f} {z:f}"
-                for (element, (x, y, z)) in zip(elements, coords)
+                for (element, (x, y, z)) in zip(elements, coords, strict=True)
             ],
         ]
     )
@@ -143,7 +123,7 @@ def _approximate_box_size(
             for atomic_num in topology.atomic_nums
         )
         * n_copies
-        for topology, n_copies in zip(system.topologies, system.n_copies)
+        for topology, n_copies in zip(system.topologies, system.n_copies, strict=True)
     )
 
     volume = weight / openmm.unit.AVOGADRO_CONSTANT_NA / config.target_density
