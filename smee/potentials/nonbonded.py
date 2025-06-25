@@ -956,7 +956,29 @@ def compute_multipole_energy(
     conformer: torch.Tensor,
     box_vectors: torch.Tensor | None = None,
     pairwise: PairwiseDistances | None = None,
+    polarization_type: str = "mutual",
 ) -> torch.Tensor:
+    """Compute the multipole energy including polarization effects.
+    
+    Args:
+        system: The system.
+        potential: The potential.
+        conformer: The conformer.
+        box_vectors: The box vectors.
+        pairwise: The pairwise distances.
+        polarization_type: The polarization solver type. Options are:
+            - "mutual": Full iterative SCF solver (default, ~60 iterations)
+            - "direct": Direct polarization with no mutual coupling (0 iterations)  
+            - "extrapolated": Extrapolated polarization using OPT3 method (4 iterations)
+    
+    Returns:
+        The energy.
+    """
+    
+    # Validate polarization_type
+    valid_types = ["mutual", "direct", "extrapolated"]
+    if polarization_type not in valid_types:
+        raise ValueError(f"polarization_type must be one of {valid_types}, got {polarization_type}")
 
     box_vectors = None if not system.is_periodic else box_vectors
 
@@ -1119,24 +1141,69 @@ def compute_multipole_energy(
     z = torch.einsum("i,i->i", precondition_m, residual)
     p = torch.clone(z)
 
-    # fixed iterations
-    for _ in range(60):
-        alpha = torch.dot(residual, z) / (p.T @ A @ p)
-        ind_dipoles = ind_dipoles + alpha * p
+    # Handle different polarization types
+    if polarization_type == "direct":
+        # Direct polarization: μ = α * E (no mutual coupling)
+        # ind_dipoles is already μ^(0) = α * E, so no additional work needed
+        pass
+    elif polarization_type == "extrapolated":
+        # Extrapolated polarization using perturbation theory
+        opt3_coeffs = torch.tensor([-0.154, 0.017, 0.658, 0.474], dtype=torch.float64)
+        pt_dipoles = torch.zeros((4, ind_dipoles.shape[0]), dtype=torch.float64)
+        pt_dipoles[0] = ind_dipoles.clone()  # μ^(0) = α * E
+        
+        # Compute perturbation theory orders: μ^(n+1) = α * (T_coupling @ μ^(n))
+        for order in range(3):  # Compute μ^(1), μ^(2), μ^(3)
+            # Compute field from current dipoles using coupling tensor
+            coupling_field = torch.zeros((system.n_particles, 3), dtype=torch.float64)
+            current_dipoles = pt_dipoles[order].reshape(system.n_particles, 3)
+            
+            for distance, delta, idx, scale in zip(
+                pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
+            ):
+                if polarizabilities[idx[0]] * polarizabilities[idx[1]] != 0:
+                    u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
+                    a = 0.39
+                    damping_term1 = 1 - torch.exp(-a * u**3)
+                    damping_term2 = 1 - (1 + a * u**3) * torch.exp(-a * u**3)
+                    
+                    t = (
+                        torch.eye(3, dtype=torch.float64) * damping_term1 * distance**-3
+                        - 3 * damping_term2 * torch.einsum("i,j->ij", delta, delta) * distance**-5
+                    )
+                    t *= scale
+                    
+                    # Add coupling contributions to field
+                    coupling_field[idx[0]] += t @ current_dipoles[idx[1]]
+                    coupling_field[idx[1]] += t @ current_dipoles[idx[0]]
+            
+            # Next order: μ^(n+1) = α * coupling_field
+            coupling_field_flat = coupling_field.reshape(3 * system.n_particles)
+            pt_dipoles[order + 1] = torch.repeat_interleave(polarizabilities, 3) * coupling_field_flat
+        
+        # Combine using OPT3 coefficients: μ_OPT3 = Σ(k=0 to 3) M_k μ^(k)
+        ind_dipoles = torch.zeros_like(ind_dipoles)
+        for k in range(4):
+            ind_dipoles += opt3_coeffs[k] * pt_dipoles[k]
+    else:  # mutual
+        # Mutual polarization using conjugate gradient (original implementation)
+        for _ in range(60):
+            alpha = torch.dot(residual, z) / (p.T @ A @ p)
+            ind_dipoles = ind_dipoles + alpha * p
 
-        prev_residual = torch.clone(residual)
-        prev_z = torch.clone(z)
+            prev_residual = torch.clone(residual)
+            prev_z = torch.clone(z)
 
-        residual = residual - alpha * A @ p
+            residual = residual - alpha * A @ p
 
-        if torch.dot(residual, residual) < 1e-7:
-            break
+            if torch.dot(residual, residual) < 1e-7:
+                break
 
-        z = torch.einsum("i,i->i", precondition_m, residual)
+            z = torch.einsum("i,i->i", precondition_m, residual)
 
-        beta = torch.dot(z, residual) / torch.dot(prev_z, prev_residual)
+            beta = torch.dot(z, residual) / torch.dot(prev_z, prev_residual)
 
-        p = z + beta * p
+            p = z + beta * p
 
     coul_energy += -0.5 * torch.dot(ind_dipoles, efield_static)
 
