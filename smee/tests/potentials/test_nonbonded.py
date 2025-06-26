@@ -594,23 +594,9 @@ def test_compute_multipole_energy_non_periodic(test_data_dir, polarization_type)
     )
     tensor_sys.is_periodic = False
 
-    # Use fixed coordinates instead of random ones to avoid problematic geometries
-    # coords, _ = smee.mm.generate_system_coords(tensor_sys, None)
-    # coords = torch.tensor(coords.value_in_unit(openmm.unit.angstrom))
-    
-    # Generate reasonable coordinates with proper spacing
-    import numpy as np
-    np.random.seed(42)  # Reproducible coordinates
-    coords = torch.tensor(np.random.uniform(-5, 5, (tensor_sys.n_particles, 3)), dtype=torch.float64)
-    
-    # Ensure minimum distance of 1.5 Å between any two atoms
-    for i in range(tensor_sys.n_particles):
-        for j in range(i+1, tensor_sys.n_particles):
-            dist = torch.norm(coords[i] - coords[j])
-            if dist < 1.5:
-                # Move atom j away from atom i
-                direction = (coords[j] - coords[i]) / dist
-                coords[j] = coords[i] + direction * 1.5
+    # Use built-in coordinate generation utility
+    coords, _ = smee.mm.generate_system_coords(tensor_sys, None)
+    coords = torch.tensor(coords.value_in_unit(openmm.unit.angstrom))
 
     es_potential = tensor_ff.potentials_by_type["Electrostatics"]
     es_potential.parameters.requires_grad = True
@@ -621,15 +607,8 @@ def test_compute_multipole_energy_non_periodic(test_data_dir, polarization_type)
     
     print(f"SMEE energy ({polarization_type}): {energy:.6f}, OpenMM energy: {expected_energy:.6f}, diff: {(energy - expected_energy):.6f}")
 
-    # Use different tolerances for different polarization types
-    if polarization_type == "direct":
-        # Direct polarization may have larger errors due to missing mutual coupling
-        atol = 5.0e-1  # 0.5 kcal/mol tolerance for direct approximation
-    elif polarization_type == "extrapolated":
-        # Extrapolated needs investigation - large tolerance for now
-        atol = 50.0  # 50 kcal/mol tolerance - needs further debugging
-    else:  # mutual
-        atol = 1.0  # 1.0 kcal/mol tolerance for mutual (there may be implementation differences)
+    # Temporary tolerance while debugging implementation issues
+    atol = 1.0e0  # 1.0 kcal/mol tolerance
     
     assert torch.allclose(energy, expected_energy, atol=atol)
 
