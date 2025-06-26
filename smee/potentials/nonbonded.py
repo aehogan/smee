@@ -928,6 +928,9 @@ def compute_dampedexp6810_energy(
         - ttdamp10 * c10 * x**-10
     )
 
+    # Apply exclusion scaling factors
+    energies *= pair_scales
+
     if not system.is_periodic:
         return energies.sum(-1)
 
@@ -1071,6 +1074,30 @@ def compute_multipole_energy(
     if torch.allclose(polarizabilities, torch.tensor(0.0, dtype=torch.float64)):
         return coul_energy
 
+    # Handle batch vs single conformer - process each conformer individually  
+    is_batch = conformer.ndim == 3
+    
+    if is_batch:
+        # Process each conformer individually and return results for each
+        n_conformers = conformer.shape[0]
+        batch_energies = []
+        
+        for conf_idx in range(n_conformers):
+            # Extract single conformer
+            single_conformer = conformer[conf_idx]
+            
+            # Compute pairwise for this conformer
+            single_pairwise = compute_pairwise(system, single_conformer, box_vectors, cutoff)
+            
+            # Recursively call this function for single conformer
+            single_energy = compute_multipole_energy(
+                system, potential, single_conformer, box_vectors, single_pairwise, polarization_type
+            )
+            batch_energies.append(single_energy)
+        
+        return torch.stack(batch_energies)
+
+    # Continue with single conformer processing
     efield_static = torch.zeros((system.n_particles, 3), dtype=torch.float64)
 
     # calculate electric field due to partial charges by hand
@@ -1155,9 +1182,10 @@ def compute_multipole_energy(
         # Compute perturbation theory orders: μ^(n+1) = α * (T_coupling @ μ^(n))
         for order in range(3):  # Compute μ^(1), μ^(2), μ^(3)
             # Compute field from current dipoles using coupling tensor
-            coupling_field = torch.zeros((system.n_particles, 3), dtype=torch.float64)
-            current_dipoles = pt_dipoles[order].reshape(system.n_particles, 3)
+            current_dipoles = pt_dipoles[order].clone().reshape(system.n_particles, 3)
             
+            # Collect all coupling field contributions
+            coupling_contributions = []
             for distance, delta, idx, scale in zip(
                 pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
             ):
@@ -1173,18 +1201,29 @@ def compute_multipole_energy(
                     )
                     t *= scale
                     
-                    # Add coupling contributions to field
-                    coupling_field[idx[0]] += t @ current_dipoles[idx[1]]
-                    coupling_field[idx[1]] += t @ current_dipoles[idx[0]]
+                    # Store coupling contributions
+                    coupling_contributions.append((idx[0], t @ current_dipoles[idx[1]]))
+                    coupling_contributions.append((idx[1], t @ current_dipoles[idx[0]]))
+            
+            # Sum all coupling field contributions using non-in-place operations
+            coupling_field_list = []
+            for i in range(system.n_particles):
+                atom_contributions = [item[1] for item in coupling_contributions if item[0] == i]
+                if atom_contributions:
+                    coupling_field_list.append(torch.stack(atom_contributions).sum(dim=0))
+                else:
+                    coupling_field_list.append(torch.zeros(3, dtype=torch.float64))
+            coupling_field = torch.stack(coupling_field_list)
             
             # Next order: μ^(n+1) = α * coupling_field
             coupling_field_flat = coupling_field.reshape(3 * system.n_particles)
             pt_dipoles[order + 1] = torch.repeat_interleave(polarizabilities, 3) * coupling_field_flat
         
         # Combine using OPT3 coefficients: μ_OPT3 = Σ(k=0 to 3) M_k μ^(k)
-        ind_dipoles = torch.zeros_like(ind_dipoles)
+        ind_dipoles_opt = torch.zeros_like(ind_dipoles)
         for k in range(4):
-            ind_dipoles += opt3_coeffs[k] * pt_dipoles[k]
+            ind_dipoles_opt = ind_dipoles_opt + opt3_coeffs[k] * pt_dipoles[k]
+        ind_dipoles = ind_dipoles_opt
     else:  # mutual
         # Mutual polarization using conjugate gradient (original implementation)
         for _ in range(60):
@@ -1205,7 +1244,66 @@ def compute_multipole_energy(
 
             p = z + beta * p
 
-    coul_energy += -0.5 * torch.dot(ind_dipoles, efield_static)
+    # Calculate polarization energy using proper three-component decomposition
+    if polarization_type == "mutual":
+        # For mutual polarization: keep the original working formula
+        # The -1/2 * μ·E formula works because the SCF process ensures
+        # that the energy is correctly computed
+        coul_energy += -0.5 * torch.dot(ind_dipoles, efield_static)
+    else:
+        # For direct and extrapolated: calculate three components explicitly
+        
+        # 1. U_permanent = -Σ_i μ_i · E_i^permanent
+        u_permanent = -torch.dot(ind_dipoles, efield_static)
+        
+        # 2. U_mutual = -1/2 Σ_i μ_i · E_i^induced (induced dipole-dipole interactions)
+        # Calculate induced field from all induced dipoles using vectorized operations
+        ind_dipoles_3d = ind_dipoles.clone().reshape(system.n_particles, 3)
+        
+        # Collect all contributions first, then sum
+        field_contributions = []
+        
+        for distance, delta, idx, scale in zip(
+            pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
+        ):
+            if polarizabilities[idx[0]] * polarizabilities[idx[1]] != 0:
+                u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
+                a = 0.39
+                damping_term1 = 1 - torch.exp(-a * u**3)
+                damping_term2 = 1 - (1 + a * u**3) * torch.exp(-a * u**3)
+                
+                # Dipole-dipole interaction tensor T_ij
+                t = (
+                    torch.eye(3, dtype=torch.float64) * damping_term1 * distance**-3
+                    - 3 * damping_term2 * torch.einsum("i,j->ij", delta, delta) * distance**-5
+                )
+                t *= scale
+                
+                # Store contributions instead of accumulating in-place
+                field_contributions.append((idx[0], t @ ind_dipoles_3d[idx[1]]))
+                field_contributions.append((idx[1], t @ ind_dipoles_3d[idx[0]]))
+        
+        # Sum all contributions using non-in-place operations
+        efield_induced_list = []
+        for i in range(system.n_particles):
+            atom_contributions = [item[1] for item in field_contributions if item[0] == i]
+            if atom_contributions:
+                efield_induced_list.append(torch.stack(atom_contributions).sum(dim=0))
+            else:
+                efield_induced_list.append(torch.zeros(3, dtype=torch.float64))
+        efield_induced_3d = torch.stack(efield_induced_list)
+        
+        u_mutual = -0.5 * torch.dot(ind_dipoles, efield_induced_3d.reshape(-1))
+        
+        # 3. U_self = 1/2 Σ_i (μ_i · μ_i) / α_i
+        # Calculate self-energy cost of creating induced dipoles
+        ind_dipoles_3d = ind_dipoles.clone().reshape(system.n_particles, 3)
+        dipole_magnitudes_sq = torch.sum(ind_dipoles_3d**2, dim=1)  # |μ_i|^2 for each atom
+        u_self = 0.5 * torch.sum(dipole_magnitudes_sq / polarizabilities)
+        
+        # Total polarization energy
+        pol_energy = u_permanent + u_mutual + u_self
+        coul_energy += pol_energy
 
     return coul_energy
 
