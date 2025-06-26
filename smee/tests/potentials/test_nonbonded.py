@@ -605,12 +605,7 @@ def test_compute_multipole_energy_non_periodic(test_data_dir, polarization_type)
     energy.backward()
     expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential, polarization_type=polarization_type)
     
-    print(f"SMEE energy ({polarization_type}): {energy:.6f}, OpenMM energy: {expected_energy:.6f}, diff: {(energy - expected_energy):.6f}")
-
-    # Temporary tolerance while debugging implementation issues
-    atol = 1.0e0  # 1.0 kcal/mol tolerance
-    
-    assert torch.allclose(energy, expected_energy, atol=atol)
+    assert torch.allclose(energy, expected_energy, atol=1e-1)
 
 
 def test_compute_multipole_energy_non_periodic_2(test_data_dir):
@@ -682,23 +677,23 @@ def test_compute_phast2_energy_non_periodic(test_data_dir):
     tensor_sys.is_periodic = False
 
     coords = torch.tensor([[[-5.5964e-02,  8.1693e-01, -5.3445e-01],
-         [ 2.5174e-01, -5.8659e-01, -8.1979e-01],
-         [ 0.0000e+00,  0.0000e+00,  0.0000e+00],
-         [ 7.6271e+00, -6.6103e-01, -5.7262e-01],
-         [ 7.7119e+00, -4.1601e-01,  9.3098e-01],
-         [ 7.9377e+00,  0.0000e+00,  0.0000e+00]],
-        [[ 7.1041e-01,  4.7487e-01, -1.5602e-01],
+         [+2.5174e-01, -5.8659e-01, -8.1979e-01],
+         [+0.0000e+00,  0.0000e+00,  0.0000e+00],
+         [+7.6271e+00, -6.6103e-01, -5.7262e-01],
+         [+7.7119e+00, -4.1601e-01,  9.3098e-01],
+         [+7.9377e+00,  0.0000e+00,  0.0000e+00]],
+        [[+7.1041e-01,  4.7487e-01, -1.5602e-01],
          [-4.8097e-01,  7.2769e-01, -2.2119e-01],
-         [ 0.0000e+00,  0.0000e+00,  0.0000e+00],
-         [ 8.1144e+00, -8.7009e-01, -3.9085e-01],
-         [ 8.1329e+00,  9.2279e-01, -4.4597e-01],
-         [ 7.9377e+00,  0.0000e+00,  0.0000e+00]],
-        [[ 2.1348e-01,  3.6725e-01,  8.3273e-01],
+         [+0.0000e+00,  0.0000e+00,  0.0000e+00],
+         [+8.1144e+00, -8.7009e-01, -3.9085e-01],
+         [+8.1329e+00,  9.2279e-01, -4.4597e-01],
+         [+7.9377e+00,  0.0000e+00,  0.0000e+00]],
+        [[+2.1348e-01,  3.6725e-01,  8.3273e-01],
          [-5.7851e-01, -6.4377e-01,  5.4664e-01],
-         [ 0.0000e+00,  0.0000e+00,  0.0000e+00],
-         [ 7.2758e+00,  3.1414e-01, -5.9182e-01],
-         [ 7.7279e+00, -5.7537e-01,  7.6088e-01],
-         [ 7.9377e+00,  0.0000e+00,  0.0000e+00]]])
+         [+0.0000e+00,  0.0000e+00,  0.0000e+00],
+         [+7.2758e+00,  3.1414e-01, -5.9182e-01],
+         [+7.7279e+00, -5.7537e-01,  7.6088e-01],
+         [+7.9377e+00,  0.0000e+00,  0.0000e+00]]])
 
     multipole_potential = tensor_ff.potentials_by_type["Electrostatics"]
     vdw_potential = tensor_ff.potentials_by_type["vdW"]
@@ -719,11 +714,55 @@ def test_compute_phast2_energy_non_periodic(test_data_dir):
         [_compute_openmm_energy(tensor_sys, coord, None, vdw_potential) for coord in coords]
     )
 
-    print("SMEE multipole energy:", multipole_energy)
-    print("OpenMM multipole energy:", multipole_expected_energy)
-    print("SMEE vdW energy:", vdw_energy)
-    print("OpenMM vdW energy:", vdw_expected_energy)
-    print("vdW energy difference:", (vdw_energy - vdw_expected_energy).abs())
     assert torch.allclose(multipole_energy, multipole_expected_energy, atol=1.0e-3)
-    assert torch.allclose(vdw_energy, vdw_expected_energy, atol=1.0e-1)
+    assert torch.allclose(vdw_energy, vdw_expected_energy, atol=1.0e-4)
 
+
+def test_compute_multipole_energy_non_periodic_4(test_data_dir):
+    tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
+        ["CC"],
+        [1],
+        openff.toolkit.ForceField(
+            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+        ),
+    )
+    tensor_sys.is_periodic = False
+
+    coords, _ = smee.mm.generate_system_coords(tensor_sys, None)
+    coords = torch.tensor(coords.value_in_unit(openmm.unit.angstrom))
+
+    es_potential = tensor_ff.potentials_by_type["Electrostatics"]
+    es_potential.parameters.requires_grad = True
+
+    energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), None,
+                                      polarization_type='direct')
+    energy.backward()
+    expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
+                                             polarization_type='direct')
+
+    assert torch.allclose(energy, expected_energy, atol=1e-4)
+
+
+def test_compute_multipole_energy_non_periodic_5(test_data_dir):
+    tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
+        ["CCCCC"],
+        [1],
+        openff.toolkit.ForceField(
+            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+        ),
+    )
+    tensor_sys.is_periodic = False
+
+    coords, _ = smee.mm.generate_system_coords(tensor_sys, None)
+    coords = torch.tensor(coords.value_in_unit(openmm.unit.angstrom))
+
+    es_potential = tensor_ff.potentials_by_type["Electrostatics"]
+    es_potential.parameters.requires_grad = True
+
+    energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), None,
+                                      polarization_type='direct')
+    energy.backward()
+    expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
+                                             polarization_type='direct')
+
+    assert torch.allclose(energy, expected_energy, atol=5e-3)

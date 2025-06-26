@@ -1239,14 +1239,57 @@ def compute_multipole_energy(
 
             p = z + beta * p
 
+    # Reshape induced dipoles back to (N, 3) for energy calculations
+    ind_dipoles_3d = ind_dipoles.reshape(system.n_particles, 3)
+
     # Calculate polarization energy based on method
     if polarization_type == "direct":
-        # For direct polarization: only permanent-induced interaction, no mutual coupling
-        # U_direct = -μ · E_permanent where μ = α * E_permanent  
+        # For direct polarization: permanent-induced + self-energy + induced-induced
+        # 1. Permanent-induced interaction: -μ · E^permanent
         coul_energy += -torch.dot(ind_dipoles, efield_static)
+        
+        # 2. Self-energy: +½ Σ (μ²/α)
+        self_energy = 0.5 * torch.sum(
+            torch.sum(ind_dipoles_3d ** 2, dim=1) / polarizabilities
+        )
+        coul_energy += self_energy
+        
+        # 3. Induced-induced interaction: -½ μ · E^induced
+        # Use the same dipole-dipole interaction tensor T that's used in the A matrix
+        T_induced = torch.zeros((3 * system.n_particles, 3 * system.n_particles), dtype=torch.float64)
+        
+        for distance, delta, idx, scale in zip(
+            pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
+        ):
+            if polarizabilities[idx[0]] * polarizabilities[idx[1]] != 0:
+                u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
+            else:
+                u = distance
+            a = 0.39
+            damping_term1 = 1 - torch.exp(-a * u**3)
+            damping_term2 = 1 - (1 + a * u**3) * torch.exp(-a * u**3)
+            
+            # Build the 3x3 dipole-dipole interaction tensor T_ij
+            # Same form as used in the A matrix construction
+            t = (
+                torch.eye(3, dtype=torch.float64) * damping_term1 * distance**-3
+                - 3 * damping_term2 * torch.einsum("i,j->ij", delta.double(), delta.double()) * distance**-5
+            )
+            t *= scale
+            
+            # Fill the interaction matrix (symmetric)
+            T_induced[3 * idx[0] : 3 * idx[0] + 3, 3 * idx[1] : 3 * idx[1] + 3] = t
+            T_induced[3 * idx[1] : 3 * idx[1] + 3, 3 * idx[0] : 3 * idx[0] + 3] = t
+        
+        # Induced-induced energy: -½ μ · (T @ μ)
+        efield_induced_flat = T_induced @ ind_dipoles
+        coul_energy += -0.5 * torch.dot(ind_dipoles, efield_induced_flat)
+        
     elif polarization_type == "mutual":
         # For mutual polarization: use standard SCF formula
+        # This automatically includes all components when converged
         coul_energy += -0.5 * torch.dot(ind_dipoles, efield_static)
+        
     else:  # extrapolated
         # For extrapolated: use same formula as mutual (OPT methods give SCF-like result)
         coul_energy += -0.5 * torch.dot(ind_dipoles, efield_static)

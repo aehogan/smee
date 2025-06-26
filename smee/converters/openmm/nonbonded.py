@@ -625,7 +625,9 @@ def convert_multipole_potential(
 
             covalent_maps = {}
 
-            for i, j in parameter_map.exclusions:
+            for (i, j), scale_idx in zip(parameter_map.exclusions, parameter_map.exclusion_scale_idxs):
+                if scale_idx == 3: # Don't exclude 1-5 interactions
+                    continue
                 i = int(i) + idx_offset
                 j = int(j) + idx_offset
                 if i in covalent_maps.keys():

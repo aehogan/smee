@@ -262,7 +262,14 @@ def convert_dampedexp6810(
 
 @smee.converters.smirnoff_parameter_converter(
     "Multipole",
-    {"polarity": _ANGSTROM**3, "cutoff": _ANGSTROM},
+    {
+        "polarity": _ANGSTROM**3,
+        "cutoff": _ANGSTROM,
+        "scale_12": _UNITLESS,
+        "scale_13": _UNITLESS,
+        "scale_14": _UNITLESS,
+        "scale_15": _UNITLESS,
+    },
     depends_on=["Electrostatics"],
 )
 def convert_multipole(
