@@ -962,7 +962,7 @@ def compute_multipole_energy(
     polarization_type: str = "mutual",
 ) -> torch.Tensor:
     """Compute the multipole energy including polarization effects.
-    
+
     Args:
         system: The system.
         potential: The potential.
@@ -971,13 +971,13 @@ def compute_multipole_energy(
         pairwise: The pairwise distances.
         polarization_type: The polarization solver type. Options are:
             - "mutual": Full iterative SCF solver (default, ~60 iterations)
-            - "direct": Direct polarization with no mutual coupling (0 iterations)  
+            - "direct": Direct polarization with no mutual coupling (0 iterations)
             - "extrapolated": Extrapolated polarization using OPT3 method (4 iterations)
-    
+
     Returns:
         The energy.
     """
-    
+
     # Validate polarization_type
     valid_types = ["mutual", "direct", "extrapolated"]
     if polarization_type not in valid_types:
@@ -991,18 +991,45 @@ def compute_multipole_energy(
 
     charges = []
     polarizabilities = []
+    damping_factors = []
 
-    # Can't use broadcast parameters because this potential has two sets of parameters
+    # Extract parameters - check if we have damping factors
     for topology, n_copies in zip(system.topologies, system.n_copies):
         parameter_map = topology.parameters[potential.type]
         topology_parameters = parameter_map.assignment_matrix @ potential.parameters
+        
+        # Extract charges from first n_particles rows
         charges.append(topology_parameters[: topology.n_particles, 0].repeat(n_copies))
-        polarizabilities.append(
-            topology_parameters[topology.n_particles :, 1].repeat(n_copies)
-        )
+        
+        # Check if we have enough rows for polarizabilities
+        if topology_parameters.shape[0] >= 2 * topology.n_particles:
+            # Extract polarizabilities from next n_particles rows
+            polarizabilities.append(
+                topology_parameters[topology.n_particles : 2 * topology.n_particles, 1].repeat(n_copies)
+            )
+            
+            # Check if we have damping factors in column 2
+            if topology_parameters.shape[1] > 2:
+                damping_factors.append(
+                    topology_parameters[topology.n_particles : 2 * topology.n_particles, 2].repeat(n_copies)
+                )
+            else:
+                # If no damping factors, derive from polarizabilities
+                # damping_factor = polarizability^(1/6) based on dimensional analysis
+                damping_factors.append(
+                    (topology_parameters[topology.n_particles : 2 * topology.n_particles, 1] ** (1.0/6.0)).repeat(n_copies)
+                )
+        else:
+            # Fallback: assume parameters are in row-wise format
+            polarizabilities.append(topology_parameters[: topology.n_particles, 1].repeat(n_copies))
+            if topology_parameters.shape[1] > 2:
+                damping_factors.append(topology_parameters[: topology.n_particles, 2].repeat(n_copies))
+            else:
+                damping_factors.append((topology_parameters[: topology.n_particles, 1] ** (1.0/6.0)).repeat(n_copies))
 
     charges = torch.cat(charges)
     polarizabilities = torch.cat(polarizabilities)
+    damping_factors = torch.cat(damping_factors) if damping_factors else None
 
     pair_scales = compute_pairwise_scales(system, potential)
 
@@ -1074,31 +1101,31 @@ def compute_multipole_energy(
     if torch.allclose(polarizabilities, torch.tensor(0.0, dtype=torch.float64)):
         return coul_energy
 
-    # Handle batch vs single conformer - process each conformer individually  
+    # Handle batch vs single conformer - process each conformer individually
     is_batch = conformer.ndim == 3
-    
+
     if is_batch:
         # Process each conformer individually and return results for each
         n_conformers = conformer.shape[0]
         batch_energies = []
-        
+
         for conf_idx in range(n_conformers):
             # Extract single conformer
             single_conformer = conformer[conf_idx]
-            
+
             # Compute pairwise for this conformer
             single_pairwise = compute_pairwise(system, single_conformer, box_vectors, cutoff)
-            
+
             # Recursively call this function for single conformer
             single_energy = compute_multipole_energy(
                 system, potential, single_conformer, box_vectors, single_pairwise, polarization_type
             )
             batch_energies.append(single_energy)
-        
+
         return torch.stack(batch_energies)
 
     # Continue with single conformer processing
-    efield_static = torch.zeros((system.n_particles, 3), dtype=torch.float64)
+    efield_static = torch.zeros((system.n_particles, 3), dtype=torch.float64, device=conformer.device)
 
     # calculate electric field due to partial charges by hand
     # TODO wolf summation for periodic
@@ -1106,14 +1133,25 @@ def compute_multipole_energy(
     for distance, delta, idx, scale in zip(
         pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
     ):
-        if polarizabilities[idx[0]] * polarizabilities[idx[1]] != 0:
-            u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (
-                1.0 / 6.0
-            )
+        # Compute damping parameter u
+        if damping_factors is not None:
+            # Use explicit damping factors like OpenMM
+            dmp = damping_factors[idx[0]] * damping_factors[idx[1]]
+            u = distance / dmp if dmp > 1e-10 else distance * 1e10
         else:
-            u = distance
+            # Fallback to polarizability-based calculation
+            if polarizabilities[idx[0]] * polarizabilities[idx[1]] > 0:
+                u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
+            else:
+                u = distance * 1e10
+                
         a = 0.39
-        damping_term1 = 1 - torch.exp(-a * u**3)
+        au3 = a * u**3
+        exp_au3 = torch.exp(-au3)
+        
+        # Thole damping for charge-dipole interactions (thole_c in OpenMM)
+        damping_term1 = 1 - exp_au3
+        
         efield_static[idx[0]] -= (
             _SQRT_COULOMB_PRE_FACTOR
             * scale
@@ -1143,18 +1181,25 @@ def compute_multipole_energy(
     for distance, delta, idx, scale in zip(
         pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
     ):
-        if polarizabilities[idx[0]] * polarizabilities[idx[1]] != 0:
-            u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (
-                1.0 / 6.0
-            )
+        # Compute damping parameter u
+        if damping_factors is not None:
+            dmp = damping_factors[idx[0]] * damping_factors[idx[1]]
+            u = distance / dmp if dmp > 1e-10 else distance * 1e10
         else:
-            u = distance
+            if polarizabilities[idx[0]] * polarizabilities[idx[1]] > 0:
+                u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
+            else:
+                u = distance * 1e10
+                
         a = 0.39
-        damping_term1 = 1 - torch.exp(-a * u**3)
-        damping_term2 = 1 - (1 + a * u**3) * torch.exp(-a * u**3)
+        au3 = a * u**3
+        exp_au3 = torch.exp(-au3)
+        
+        damping_term1 = 1 - exp_au3
+        damping_term2 = 1 - (1 + 1.5 * au3) * exp_au3
 
         t = (
-            torch.eye(3) * damping_term1 * distance**-3
+            torch.eye(3, dtype=torch.float64, device=conformer.device) * damping_term1 * distance**-3
             - 3 * damping_term2 * torch.einsum("i,j->ij", delta, delta) * distance**-5
         )
         t *= scale
@@ -1176,53 +1221,62 @@ def compute_multipole_energy(
     elif polarization_type == "extrapolated":
         # Extrapolated polarization using OPT3 perturbation theory
         # OPT3 coefficients
-        opt3_coeffs = torch.tensor([-0.154, 0.017, 0.658, 0.474], dtype=torch.float64)
-        
+        opt3_coeffs = torch.tensor([-0.154, 0.017, 0.658, 0.474], dtype=torch.float64, device=conformer.device)
+
         # Build the coupling tensor T once (without diagonal terms)
         # T matrix represents dipole-dipole interactions: T_ij = (damped dipole tensor)
-        T = torch.zeros((3 * system.n_particles, 3 * system.n_particles), dtype=torch.float64)
-        
+        T = torch.zeros((3 * system.n_particles, 3 * system.n_particles), dtype=torch.float64, device=conformer.device)
+
         for distance, delta, idx, scale in zip(
             pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
         ):
-            if polarizabilities[idx[0]] * polarizabilities[idx[1]] != 0:
-                u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
-                a = 0.39
-                damping_term1 = 1 - torch.exp(-a * u**3)
-                damping_term2 = 1 - (1 + a * u**3) * torch.exp(-a * u**3)
-                
-                # Build damped dipole-dipole tensor
-                t = (
-                    torch.eye(3, dtype=torch.float64) * damping_term1 * distance**-3
-                    - 3 * damping_term2 * torch.einsum("i,j->ij", delta, delta) * distance**-5
-                )
-                t *= scale
-                
-                # Fill T matrix (symmetric)
-                T[3 * idx[0] : 3 * idx[0] + 3, 3 * idx[1] : 3 * idx[1] + 3] = t
-                T[3 * idx[1] : 3 * idx[1] + 3, 3 * idx[0] : 3 * idx[0] + 3] = t
-        
+            if damping_factors is not None:
+                dmp = damping_factors[idx[0]] * damping_factors[idx[1]]
+                u = distance / dmp if dmp > 1e-10 else distance * 1e10
+            else:
+                if polarizabilities[idx[0]] * polarizabilities[idx[1]] > 0:
+                    u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
+                else:
+                    u = distance * 1e10
+                    
+            a = 0.39
+            au3 = a * u**3
+            exp_au3 = torch.exp(-au3)
+            damping_term1 = 1 - exp_au3
+            damping_term2 = 1 - (1 + au3) * exp_au3
+
+            # Build damped dipole-dipole tensor
+            t = (
+                torch.eye(3, dtype=torch.float64, device=conformer.device) * damping_term1 * distance**-3
+                - 3 * damping_term2 * torch.einsum("i,j->ij", delta, delta) * distance**-5
+            )
+            t *= scale
+
+            # Fill T matrix (symmetric)
+            T[3 * idx[0] : 3 * idx[0] + 3, 3 * idx[1] : 3 * idx[1] + 3] = t
+            T[3 * idx[1] : 3 * idx[1] + 3, 3 * idx[0] : 3 * idx[0] + 3] = t
+
         # Precompute α vector for efficient multiplication
         alpha_vec = torch.repeat_interleave(polarizabilities, 3)
-        
+
         # Store perturbation theory orders: μ^(0), μ^(1), μ^(2), μ^(3)
         pt_dipoles = []
         pt_dipoles.append(ind_dipoles.clone())  # μ^(0) = α * E^(0)
-        
+
         # Compute perturbation orders: μ^(n+1) = α * (T @ μ^(n))
         for order in range(3):  # Compute μ^(1), μ^(2), μ^(3)
             # Next order: μ^(n+1) = α * (T @ μ^(n))
             field_from_dipoles = T @ pt_dipoles[order]
             next_order_dipoles = alpha_vec * field_from_dipoles
             pt_dipoles.append(next_order_dipoles)
-        
+
         # Apply OPT3 combination: μ_OPT3 = Σ(k=0 to 3) c_k μ^(k)
         # Use tensor operations to avoid in-place modifications
         ind_dipoles = torch.stack([opt3_coeffs[k] * pt_dipoles[k] for k in range(4)]).sum(dim=0)
     else:  # mutual
         # Mutual polarization using conjugate gradient (original implementation)
         for _ in range(60):
-            alpha = torch.dot(residual, z) / (p.T @ A @ p)
+            alpha = torch.dot(residual, z) / (p @ A @ p)
             ind_dipoles = ind_dipoles + alpha * p
 
             prev_residual = torch.clone(residual)
@@ -1241,57 +1295,76 @@ def compute_multipole_energy(
 
     # Reshape induced dipoles back to (N, 3) for energy calculations
     ind_dipoles_3d = ind_dipoles.reshape(system.n_particles, 3)
+    
+    # DEBUG: Print induced dipoles for comparison with OpenMM
+    if True:  # Set to False to disable debug output
+        # Convert to OpenMM units for comparison (divide by 182.26)
+        conversion_factor = 182.26
+        ind_dipoles_openmm_units = ind_dipoles_3d / conversion_factor
+        
+        print(f"DEBUG SMEE induced dipoles ({polarization_type}) converted to OpenMM units:")
+        print("DEBUG SMEE induced dipoles (first 10 particles, in e*nm):")
+        for i in range(min(10, ind_dipoles_openmm_units.shape[0])):
+            dipole = ind_dipoles_openmm_units[i]
+            print(f"  Particle {i:2d}: [{dipole[0]:8.5f}, {dipole[1]:8.5f}, {dipole[2]:8.5f}]")
+        
+        # Calculate total dipole magnitude in OpenMM units
+        total_mag_openmm = torch.sum(torch.norm(ind_dipoles_openmm_units, dim=1)).item()
+        print(f"DEBUG Total induced dipole magnitude (OpenMM units): {total_mag_openmm:.6f} e*nm")
 
     # Calculate polarization energy based on method
-    if polarization_type == "direct":
+    if polarization_type == "direct" or polarization_type == "extrapolated":
         # For direct polarization: permanent-induced + self-energy + induced-induced
         # 1. Permanent-induced interaction: -μ · E^permanent
         coul_energy += -torch.dot(ind_dipoles, efield_static)
-        
+
         # 2. Self-energy: +½ Σ (μ²/α)
         self_energy = 0.5 * torch.sum(
             torch.sum(ind_dipoles_3d ** 2, dim=1) / polarizabilities
         )
         coul_energy += self_energy
-        
+
         # 3. Induced-induced interaction: -½ μ · E^induced
         # Use the same dipole-dipole interaction tensor T that's used in the A matrix
-        T_induced = torch.zeros((3 * system.n_particles, 3 * system.n_particles), dtype=torch.float64)
-        
+        T_induced = torch.zeros((3 * system.n_particles, 3 * system.n_particles), dtype=torch.float64, device=conformer.device)
+
         for distance, delta, idx, scale in zip(
             pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
         ):
-            if polarizabilities[idx[0]] * polarizabilities[idx[1]] != 0:
-                u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
+            if damping_factors is not None:
+                dmp = damping_factors[idx[0]] * damping_factors[idx[1]]
+                u = distance / dmp if dmp > 1e-10 else distance * 1e10
             else:
-                u = distance
+                if polarizabilities[idx[0]] * polarizabilities[idx[1]] > 0:
+                    u = distance / (polarizabilities[idx[0]] * polarizabilities[idx[1]]) ** (1.0 / 6.0)
+                else:
+                    u = distance * 1e10
+                    
             a = 0.39
-            damping_term1 = 1 - torch.exp(-a * u**3)
-            damping_term2 = 1 - (1 + a * u**3) * torch.exp(-a * u**3)
-            
+            au3 = a * u**3
+            exp_au3 = torch.exp(-au3)
+            damping_term1 = 1 - exp_au3
+            damping_term2 = 1 - (1 + au3) * exp_au3
+
             # Build the 3x3 dipole-dipole interaction tensor T_ij
             # Same form as used in the A matrix construction
             t = (
-                torch.eye(3, dtype=torch.float64) * damping_term1 * distance**-3
+                torch.eye(3, dtype=torch.float64, device=conformer.device) * damping_term1 * distance**-3
                 - 3 * damping_term2 * torch.einsum("i,j->ij", delta.double(), delta.double()) * distance**-5
             )
             t *= scale
-            
+
             # Fill the interaction matrix (symmetric)
             T_induced[3 * idx[0] : 3 * idx[0] + 3, 3 * idx[1] : 3 * idx[1] + 3] = t
             T_induced[3 * idx[1] : 3 * idx[1] + 3, 3 * idx[0] : 3 * idx[0] + 3] = t
-        
+
         # Induced-induced energy: -½ μ · (T @ μ)
         efield_induced_flat = T_induced @ ind_dipoles
         coul_energy += -0.5 * torch.dot(ind_dipoles, efield_induced_flat)
-        
+
     elif polarization_type == "mutual":
         # For mutual polarization: use standard SCF formula
         # This automatically includes all components when converged
-        coul_energy += -0.5 * torch.dot(ind_dipoles, efield_static)
-        
-    else:  # extrapolated
-        # For extrapolated: use same formula as mutual (OPT methods give SCF-like result)
         coul_energy += -0.5 * torch.dot(ind_dipoles, efield_static)
 
     return coul_energy
