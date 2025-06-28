@@ -22,11 +22,11 @@ from smee.potentials.nonbonded import (
     compute_dampedexp6810_energy,
     compute_dexp_energy,
     compute_lj_energy,
-    compute_multipole_energy,
     compute_pairwise,
     compute_pairwise_scales,
     prepare_lrc_types,
 )
+from smee.potentials.multipole import compute_multipole_energy
 
 
 def _compute_openmm_energy(
@@ -794,3 +794,34 @@ def test_compute_multipole_energy_non_periodic_5(test_data_dir):
                                              polarization_type='direct')
 
     assert torch.allclose(energy, expected_energy, atol=5e-3)
+
+
+@pytest.mark.parametrize("polarization_type", ["direct", "mutual", "extrapolated"])
+def test_compute_multipole_energy_periodic(test_data_dir, polarization_type):
+    tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
+        ["CC", "O"],
+        [10, 15],
+        openff.toolkit.ForceField(
+            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+        ),
+    )
+    tensor_sys.is_periodic = True
+
+    # Use lower density to ensure box size >= 2*cutoff (18.0 Å)
+    config = smee.mm.GenerateCoordsConfig(
+        target_density=0.4 * openmm.unit.gram / openmm.unit.milliliter,
+        scale_factor=1.3,
+        padding=3.0 * openmm.unit.angstrom,
+    )
+    coords, box_vectors = smee.mm.generate_system_coords(tensor_sys, None, config)
+    coords = torch.tensor(coords.value_in_unit(openmm.unit.angstrom))
+    box_vectors = torch.tensor(box_vectors.value_in_unit(openmm.unit.angstrom))
+
+    es_potential = tensor_ff.potentials_by_type["Electrostatics"]
+    es_potential.parameters.requires_grad = True
+
+    energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), box_vectors.float(), polarization_type=polarization_type)
+    energy.backward()
+    expected_energy = _compute_openmm_energy(tensor_sys, coords, box_vectors, es_potential, polarization_type=polarization_type)
+    
+    assert torch.allclose(energy, expected_energy, atol=1e-2)

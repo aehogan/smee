@@ -263,7 +263,29 @@ def convert_dampedexp6810(
 @smee.converters.smirnoff_parameter_converter(
     "Multipole",
     {
+        # Molecular multipole moments
+        "dipoleX": _ELEMENTARY_CHARGE * _ANGSTROM,
+        "dipoleY": _ELEMENTARY_CHARGE * _ANGSTROM,
+        "dipoleZ": _ELEMENTARY_CHARGE * _ANGSTROM,
+        "quadrupoleXX": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        "quadrupoleXY": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        "quadrupoleXZ": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        "quadrupoleYX": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        "quadrupoleYY": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        "quadrupoleYZ": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        "quadrupoleZX": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        "quadrupoleZY": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        "quadrupoleZZ": _ELEMENTARY_CHARGE * _ANGSTROM**2,
+        # Local frame definition
+        "axisType": _UNITLESS,
+        "multipoleAtomZ": _UNITLESS,
+        "multipoleAtomX": _UNITLESS,
+        "multipoleAtomY": _UNITLESS,
+        # Damping and polarizability (these may not be present in current force fields)
+        "thole": _UNITLESS,
+        "dampingFactor": _ANGSTROM,
         "polarity": _ANGSTROM**3,
+        # Cutoff and scaling
         "cutoff": _ANGSTROM,
         "scale_12": _UNITLESS,
         "scale_13": _UNITLESS,
@@ -293,7 +315,14 @@ def convert_multipole(
         "Multipole",
         topologies,
         v_site_maps,
-        ("polarity",),
+        (
+            "dipoleX", "dipoleY", "dipoleZ",
+            "quadrupoleXX", "quadrupoleXY", "quadrupoleXZ",
+            "quadrupoleYX", "quadrupoleYY", "quadrupoleYZ", 
+            "quadrupoleZX", "quadrupoleZY", "quadrupoleZZ",
+            "axisType", "multipoleAtomZ", "multipoleAtomX", "multipoleAtomY",
+            "thole", "dampingFactor", "polarity"
+        ),
         ("cutoff",),
         has_exclusions=False,
     )
@@ -321,11 +350,17 @@ def convert_multipole(
         *potential_pol.parameter_keys,
     ]
 
+    # Handle different numbers of columns between charge and polarizability potentials
+    n_chg_cols = potential_chg.parameters.shape[1]
+    n_pol_cols = potential_pol.parameters.shape[1]
+    
+    # Pad charge parameters with zeros for the new polarizability columns
     parameters_chg = torch.cat(
-        (potential_chg.parameters, torch.zeros_like(potential_chg.parameters)), dim=1
+        (potential_chg.parameters, torch.zeros(potential_chg.parameters.shape[0], n_pol_cols, dtype=potential_chg.parameters.dtype)), dim=1
     )
+    # Pad polarizability parameters with zeros for the charge columns
     parameters_pol = torch.cat(
-        (torch.zeros_like(potential_pol.parameters), potential_pol.parameters), dim=1
+        (torch.zeros(potential_pol.parameters.shape[0], n_chg_cols, dtype=potential_pol.parameters.dtype), potential_pol.parameters), dim=1
     )
     potential_chg.parameters = torch.cat((parameters_chg, parameters_pol), dim=0)
 
