@@ -30,11 +30,11 @@ from smee.potentials.multipole import compute_multipole_energy
 
 
 def _compute_openmm_energy(
-    system: smee.TensorSystem,
-    coords: torch.Tensor,
-    box_vectors: torch.Tensor | None,
-    potential: smee.TensorPotential,
-    polarization_type: str | None = None,
+        system: smee.TensorSystem,
+        coords: torch.Tensor,
+        box_vectors: torch.Tensor | None,
+        potential: smee.TensorPotential,
+        polarization_type: str | None = None,
 ) -> torch.Tensor:
     coords = coords.numpy() * openmm.unit.angstrom
 
@@ -312,7 +312,7 @@ def test_compute_xxx_lrc_with_exceptions(lrc_fn, convert_fn):
     rs = torch.tensor(8.0)
     rc = torch.tensor(9.0)
 
-    volume = torch.tensor(18.0**3)
+    volume = torch.tensor(18.0 ** 3)
 
     lrc_no_exceptions = lrc_fn(system, vdw_potential_no_exceptions, rs, rc, volume)
 
@@ -337,7 +337,7 @@ def test_compute_xxx_lrc_with_exceptions(lrc_fn, convert_fn):
     ],
 )
 def test_compute_xxx_energy_periodic(
-    energy_fn, convert_fn, etoh_water_system, with_exceptions
+        energy_fn, convert_fn, etoh_water_system, with_exceptions
 ):
     tensor_sys, tensor_ff, coords, box_vectors = etoh_water_system
 
@@ -395,17 +395,17 @@ def _expected_energy_lj_exceptions(params: dict[str, smee.tests.utils.LJParam]):
     sqrt_2 = math.sqrt(2)
 
     expected_energy = 4.0 * (
-        params["oh"].eps * (params["oh"].sig ** 12 - params["oh"].sig ** 6)
-        + params["oh"].eps * (params["oh"].sig ** 12 - params["oh"].sig ** 6)
-        #
-        + params["ah"].eps * (params["ah"].sig ** 12 - params["ah"].sig ** 6)
-        + params["ah"].eps * (params["ah"].sig ** 12 - params["ah"].sig ** 6)
-        #
-        + params["hh"].eps
-        * ((params["hh"].sig / sqrt_2) ** 12 - (params["hh"].sig / sqrt_2) ** 6)
-        #
-        + params["oa"].eps
-        * ((params["oa"].sig / sqrt_2) ** 12 - (params["oa"].sig / sqrt_2) ** 6)
+            params["oh"].eps * (params["oh"].sig ** 12 - params["oh"].sig ** 6)
+            + params["oh"].eps * (params["oh"].sig ** 12 - params["oh"].sig ** 6)
+            #
+            + params["ah"].eps * (params["ah"].sig ** 12 - params["ah"].sig ** 6)
+            + params["ah"].eps * (params["ah"].sig ** 12 - params["ah"].sig ** 6)
+            #
+            + params["hh"].eps
+            * ((params["hh"].sig / sqrt_2) ** 12 - (params["hh"].sig / sqrt_2) ** 6)
+            #
+            + params["oa"].eps
+            * ((params["oa"].sig / sqrt_2) ** 12 - (params["oa"].sig / sqrt_2) ** 6)
     )
     return expected_energy
 
@@ -427,15 +427,15 @@ def _expected_energy_dexp_exceptions(params: dict[str, smee.tests.utils.LJParam]
     sqrt_2 = math.sqrt(2)
 
     expected_energy = (
-        _dexp(params["oh"].eps, params["oh"].sig, 1.0)
-        + _dexp(params["oh"].eps, params["oh"].sig, 1.0)
-        #
-        + _dexp(params["ah"].eps, params["ah"].sig, 1.0)
-        + _dexp(params["ah"].eps, params["ah"].sig, 1.0)
-        #
-        + _dexp(params["hh"].eps, params["hh"].sig, sqrt_2)
-        #
-        + _dexp(params["oa"].eps, params["oa"].sig, sqrt_2)
+            _dexp(params["oh"].eps, params["oh"].sig, 1.0)
+            + _dexp(params["oh"].eps, params["oh"].sig, 1.0)
+            #
+            + _dexp(params["ah"].eps, params["ah"].sig, 1.0)
+            + _dexp(params["ah"].eps, params["ah"].sig, 1.0)
+            #
+            + _dexp(params["hh"].eps, params["hh"].sig, sqrt_2)
+            #
+            + _dexp(params["oa"].eps, params["oa"].sig, sqrt_2)
     )
     return expected_energy
 
@@ -445,9 +445,9 @@ def _expected_energy_dexp_exceptions(params: dict[str, smee.tests.utils.LJParam]
     [
         (compute_lj_energy, lambda p: p, _expected_energy_lj_exceptions),
         (
-            compute_dexp_energy,
-            smee.tests.utils.convert_lj_to_dexp,
-            _expected_energy_dexp_exceptions,
+                compute_dexp_energy,
+                smee.tests.utils.convert_lj_to_dexp,
+                _expected_energy_dexp_exceptions,
         ),
     ],
 )
@@ -549,7 +549,7 @@ def test_compute_coulomb_energy_non_periodic():
     assert torch.isclose(energy, expected_energy, atol=1.0e-4)
 
 
-def test_compute_dampedexp6810_energy_non_periodic(test_data_dir):
+def test_compute_dampedexp6810_energy_ne_scan_non_periodic(test_data_dir):
     tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
         ["[Ne]", "[Ne]"],
         [1, 1],
@@ -583,60 +583,80 @@ def test_compute_dampedexp6810_energy_non_periodic(test_data_dir):
     assert torch.allclose(energies, expected_energies.float(), atol=1.0e-4)
 
 
-@pytest.mark.parametrize("polarization_type", ["direct", "mutual", "extrapolated"])
-def test_compute_multipole_energy_non_periodic(test_data_dir, polarization_type):
+@pytest.mark.parametrize(
+    "forcefield_name,polarization_type",
+    [
+        ("PHAST-H2CNO-nonpolar-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "mutual"),
+        ("PHAST-H2CNO-2.0.0.offxml", "extrapolated")
+    ]
+)
+def test_compute_multipole_energy_CC_O_non_periodic(test_data_dir, forcefield_name, polarization_type):
     tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
         ["CC", "O"],
         [3, 2],
         openff.toolkit.ForceField(
-            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+            str(test_data_dir / forcefield_name), load_plugins=True
         ),
     )
     tensor_sys.is_periodic = False
 
     # Use fixed coordinates to ensure reproducibility
-    coords = torch.tensor([[ 5.9731,  4.8234,  5.1358],
-        [ 5.6308,  3.4725,  5.7007],
-        [ 5.0358,  5.2467,  4.7020],
-        [ 6.2522,  5.4850,  5.9780],
-        [ 6.7136,  4.7967,  4.3256],
-        [ 4.9936,  3.6648,  6.6100],
-        [ 6.5061,  2.9131,  6.0617],
-        [ 5.0991,  2.8173,  4.9849],
-        [ 0.9326,  2.8105,  5.2711],
-        [ 0.9434,  1.3349,  5.5607],
-        [ 1.1295,  2.9339,  4.1794],
-        [-0.0939,  3.1853,  5.4460],
-        [ 1.7103,  3.3774,  5.7996],
-        [ 0.0123,  0.9149,  5.0849],
-        [ 0.8655,  1.0972,  6.6316],
-        [ 1.8432,  0.8172,  5.1776],
-        [ 3.2035,  0.7561,  3.0346],
-        [ 3.4468,  1.0277,  1.5757],
-        [ 4.1522,  0.3467,  3.4566],
-        [ 3.0323,  1.7263,  3.5387],
-        [ 2.4222,  0.0093,  3.2280],
-        [ 4.1461,  1.9103,  1.5332],
-        [ 2.5430,  1.3356,  1.0299],
-        [ 3.8762,  0.1647,  1.0324],
-        [ 6.3764,  1.9600,  2.9162],
-        [ 6.1056,  1.3456,  3.6328],
-        [ 6.6023,  2.8357,  3.3122],
-        [ 3.0792,  6.2544,  4.6979],
-        [ 3.5093,  6.6131,  5.5045],
-        [ 3.5237,  6.6324,  3.9016]], dtype=torch.float64)
+    coords = torch.tensor([
+        [5.9731, 4.8234, 5.1358],
+        [5.6308, 3.4725, 5.7007],
+        [5.0358, 5.2467, 4.7020],
+        [6.2522, 5.4850, 5.9780],
+        [6.7136, 4.7967, 4.3256],
+        [4.9936, 3.6648, 6.6100],
+        [6.5061, 2.9131, 6.0617],
+        [5.0991, 2.8173, 4.9849],
+        [0.9326, 2.8105, 5.2711],
+        [0.9434, 1.3349, 5.5607],
+        [1.1295, 2.9339, 4.1794],
+        [-0.0939, 3.1853, 5.4460],
+        [1.7103, 3.3774, 5.7996],
+        [0.0123, 0.9149, 5.0849],
+        [0.8655, 1.0972, 6.6316],
+        [1.8432, 0.8172, 5.1776],
+        [3.2035, 0.7561, 3.0346],
+        [3.4468, 1.0277, 1.5757],
+        [4.1522, 0.3467, 3.4566],
+        [3.0323, 1.7263, 3.5387],
+        [2.4222, 0.0093, 3.2280],
+        [4.1461, 1.9103, 1.5332],
+        [2.5430, 1.3356, 1.0299],
+        [3.8762, 0.1647, 1.0324],
+        [6.3764, 1.9600, 2.9162],
+        [6.1056, 1.3456, 3.6328],
+        [6.6023, 2.8357, 3.3122],
+        [3.0792, 6.2544, 4.6979],
+        [3.5093, 6.6131, 5.5045],
+        [3.5237, 6.6324, 3.9016]], dtype=torch.float64)
 
     es_potential = tensor_ff.potentials_by_type["Electrostatics"]
     es_potential.parameters.requires_grad = True
 
-    energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), None, polarization_type=polarization_type)
+    energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), None,
+                                      polarization_type=polarization_type)
     energy.backward()
-    expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential, polarization_type=polarization_type)
-    
+    expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
+                                             polarization_type=polarization_type)
+
     assert torch.allclose(energy, expected_energy, atol=5e-3)
 
 
-def test_compute_multipole_energy_non_periodic_2(test_data_dir):
+@pytest.mark.parametrize(
+    "forcefield_name,polarization_type",
+    [
+        ("PHAST-H2CNO-nonpolar-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "mutual"),
+        ("PHAST-H2CNO-2.0.0.offxml", "extrapolated")
+    ]
+)
+def test_compute_multipole_energy_charged_ne_non_periodic(test_data_dir, forcefield_name, polarization_type):
     tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
         ["[Ne]", "[Ne]"],
         [1, 1],
@@ -652,17 +672,26 @@ def test_compute_multipole_energy_non_periodic_2(test_data_dir):
     tensor_ff.potentials_by_type["Electrostatics"].parameters[0, 0] = 1
 
     energy = compute_multipole_energy(
-        tensor_sys, tensor_ff.potentials_by_type["Electrostatics"], coords, None
+        tensor_sys, tensor_ff.potentials_by_type["Electrostatics"], coords, None, polarization_type=polarization_type
     )
 
     expected_energy = _compute_openmm_energy(
-        tensor_sys, coords, None, tensor_ff.potentials_by_type["Electrostatics"]
+        tensor_sys, coords, None, tensor_ff.potentials_by_type["Electrostatics"], polarization_type=polarization_type
     )
 
     assert torch.allclose(energy, expected_energy, atol=1.0e-4)
 
 
-def test_compute_multipole_energy_non_periodic_3(test_data_dir):
+@pytest.mark.parametrize(
+    "forcefield_name,polarization_type",
+    [
+        ("PHAST-H2CNO-nonpolar-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "mutual"),
+        ("PHAST-H2CNO-2.0.0.offxml", "extrapolated")
+    ]
+)
+def test_compute_multipole_energy_c_xe_non_periodic(test_data_dir, forcefield_name, polarization_type):
     tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
         ["C", "[Xe]"],
         [1, 1],
@@ -684,17 +713,26 @@ def test_compute_multipole_energy_non_periodic_3(test_data_dir):
     )
 
     energy = compute_multipole_energy(
-        tensor_sys, tensor_ff.potentials_by_type["Electrostatics"], coords, None
+        tensor_sys, tensor_ff.potentials_by_type["Electrostatics"], coords, None, polarization_type=polarization_type
     )
 
     expected_energy = _compute_openmm_energy(
-        tensor_sys, coords, None, tensor_ff.potentials_by_type["Electrostatics"]
+        tensor_sys, coords, None, tensor_ff.potentials_by_type["Electrostatics"], polarization_type=polarization_type
     )
 
     assert torch.allclose(energy, expected_energy, atol=1.0e-4)
 
 
-def test_compute_phast2_energy_non_periodic(test_data_dir):
+@pytest.mark.parametrize(
+    "forcefield_name,polarization_type",
+    [
+        ("PHAST-H2CNO-nonpolar-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "mutual"),
+        ("PHAST-H2CNO-2.0.0.offxml", "extrapolated")
+    ]
+)
+def test_compute_phast2_energy_water_conformers_non_periodic(test_data_dir, forcefield_name, polarization_type):
     tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
         ["O"],
         [2],
@@ -704,34 +742,34 @@ def test_compute_phast2_energy_non_periodic(test_data_dir):
     )
     tensor_sys.is_periodic = False
 
-    coords = torch.tensor([[[-5.5964e-02,  8.1693e-01, -5.3445e-01],
-         [+2.5174e-01, -5.8659e-01, -8.1979e-01],
-         [+0.0000e+00,  0.0000e+00,  0.0000e+00],
-         [+7.6271e+00, -6.6103e-01, -5.7262e-01],
-         [+7.7119e+00, -4.1601e-01,  9.3098e-01],
-         [+7.9377e+00,  0.0000e+00,  0.0000e+00]],
-        [[+7.1041e-01,  4.7487e-01, -1.5602e-01],
-         [-4.8097e-01,  7.2769e-01, -2.2119e-01],
-         [+0.0000e+00,  0.0000e+00,  0.0000e+00],
-         [+8.1144e+00, -8.7009e-01, -3.9085e-01],
-         [+8.1329e+00,  9.2279e-01, -4.4597e-01],
-         [+7.9377e+00,  0.0000e+00,  0.0000e+00]],
-        [[+2.1348e-01,  3.6725e-01,  8.3273e-01],
-         [-5.7851e-01, -6.4377e-01,  5.4664e-01],
-         [+0.0000e+00,  0.0000e+00,  0.0000e+00],
-         [+7.2758e+00,  3.1414e-01, -5.9182e-01],
-         [+7.7279e+00, -5.7537e-01,  7.6088e-01],
-         [+7.9377e+00,  0.0000e+00,  0.0000e+00]]])
+    coords = torch.tensor([[[-5.5964e-02, 8.1693e-01, -5.3445e-01],
+                            [+2.5174e-01, -5.8659e-01, -8.1979e-01],
+                            [+0.0000e+00, 0.0000e+00, 0.0000e+00],
+                            [+7.6271e+00, -6.6103e-01, -5.7262e-01],
+                            [+7.7119e+00, -4.1601e-01, 9.3098e-01],
+                            [+7.9377e+00, 0.0000e+00, 0.0000e+00]],
+                           [[+7.1041e-01, 4.7487e-01, -1.5602e-01],
+                            [-4.8097e-01, 7.2769e-01, -2.2119e-01],
+                            [+0.0000e+00, 0.0000e+00, 0.0000e+00],
+                            [+8.1144e+00, -8.7009e-01, -3.9085e-01],
+                            [+8.1329e+00, 9.2279e-01, -4.4597e-01],
+                            [+7.9377e+00, 0.0000e+00, 0.0000e+00]],
+                           [[+2.1348e-01, 3.6725e-01, 8.3273e-01],
+                            [-5.7851e-01, -6.4377e-01, 5.4664e-01],
+                            [+0.0000e+00, 0.0000e+00, 0.0000e+00],
+                            [+7.2758e+00, 3.1414e-01, -5.9182e-01],
+                            [+7.7279e+00, -5.7537e-01, 7.6088e-01],
+                            [+7.9377e+00, 0.0000e+00, 0.0000e+00]]])
 
     multipole_potential = tensor_ff.potentials_by_type["Electrostatics"]
     vdw_potential = tensor_ff.potentials_by_type["vdW"]
 
     multipole_energy = compute_multipole_energy(
-        tensor_sys, multipole_potential, coords, None
+        tensor_sys, multipole_potential, coords, None, polarization_type=polarization_type
     )
 
     multipole_expected_energy = torch.tensor(
-        [_compute_openmm_energy(tensor_sys, coord, None, multipole_potential) for coord in coords]
+        [_compute_openmm_energy(tensor_sys, coord, None, multipole_potential, polarization_type=polarization_type) for coord in coords]
     )
 
     vdw_energy = compute_dampedexp6810_energy(
@@ -746,9 +784,19 @@ def test_compute_phast2_energy_non_periodic(test_data_dir):
     assert torch.allclose(vdw_energy, vdw_expected_energy, atol=1.0e-4)
 
 
-def test_compute_multipole_energy_non_periodic_4(test_data_dir):
+@pytest.mark.parametrize(
+    "forcefield_name,polarization_type",
+    [
+        ("PHAST-H2CNO-nonpolar-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "mutual"),
+        ("PHAST-H2CNO-2.0.0.offxml", "extrapolated")
+    ]
+)
+@pytest.mark.parametrize("smiles", ["CC", "CCC", "CCCC", "CCCCC"])
+def test_compute_multipole_energy_isolated_non_periodic(test_data_dir, forcefield_name, polarization_type, smiles):
     tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
-        ["CC"],
+        [smiles],
         [1],
         openff.toolkit.ForceField(
             str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
@@ -763,46 +811,29 @@ def test_compute_multipole_energy_non_periodic_4(test_data_dir):
     es_potential.parameters.requires_grad = True
 
     energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), None,
-                                      polarization_type='direct')
+                                      polarization_type=polarization_type)
     energy.backward()
     expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
-                                             polarization_type='direct')
+                                             polarization_type=polarization_type)
 
     assert torch.allclose(energy, expected_energy, atol=1e-4)
 
 
-def test_compute_multipole_energy_non_periodic_5(test_data_dir):
-    tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
-        ["CCCCC"],
-        [1],
-        openff.toolkit.ForceField(
-            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
-        ),
-    )
-    tensor_sys.is_periodic = False
-
-    coords, _ = smee.mm.generate_system_coords(tensor_sys, None)
-    coords = torch.tensor(coords.value_in_unit(openmm.unit.angstrom))
-
-    es_potential = tensor_ff.potentials_by_type["Electrostatics"]
-    es_potential.parameters.requires_grad = True
-
-    energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), None,
-                                      polarization_type='direct')
-    energy.backward()
-    expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
-                                             polarization_type='direct')
-
-    assert torch.allclose(energy, expected_energy, atol=5e-3)
-
-
-@pytest.mark.parametrize("polarization_type", ["direct", "mutual", "extrapolated"])
-def test_compute_multipole_energy_periodic(test_data_dir, polarization_type):
+@pytest.mark.parametrize(
+    "forcefield_name,polarization_type",
+    [
+        ("PHAST-H2CNO-nonpolar-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "direct"),
+        ("PHAST-H2CNO-2.0.0.offxml", "mutual"),
+        ("PHAST-H2CNO-2.0.0.offxml", "extrapolated")
+    ]
+)
+def test_compute_multipole_energy_CC_O_periodic(test_data_dir, forcefield_name, polarization_type):
     tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
         ["CC", "O"],
         [10, 15],
         openff.toolkit.ForceField(
-            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+            str(test_data_dir / forcefield_name), load_plugins=True
         ),
     )
     tensor_sys.is_periodic = True
@@ -820,8 +851,10 @@ def test_compute_multipole_energy_periodic(test_data_dir, polarization_type):
     es_potential = tensor_ff.potentials_by_type["Electrostatics"]
     es_potential.parameters.requires_grad = True
 
-    energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), box_vectors.float(), polarization_type=polarization_type)
+    energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), box_vectors.float(),
+                                      polarization_type=polarization_type)
     energy.backward()
-    expected_energy = _compute_openmm_energy(tensor_sys, coords, box_vectors, es_potential, polarization_type=polarization_type)
-    
+    expected_energy = _compute_openmm_energy(tensor_sys, coords, box_vectors, es_potential,
+                                             polarization_type=polarization_type)
+
     assert torch.allclose(energy, expected_energy, atol=1e-2)
