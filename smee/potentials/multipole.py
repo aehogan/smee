@@ -20,6 +20,7 @@ def compute_multipole_energy(
     polarization_type: str = "mutual",
     extrapolation_coefficients: list[float] | None = None,
 ) -> torch.Tensor:
+    print(f"DEBUG: Multipole energy calculation with polarization_type={polarization_type}")
     """Compute the multipole energy including polarization effects.
 
     This function supports the full AMOEBA multipole model with the following parameters
@@ -77,8 +78,8 @@ def compute_multipole_energy(
 
     # Initialize parameter lists for all AMOEBA multipole parameters
     charges = []
-    molecular_dipoles = []  # 3 components per atom
-    molecular_quadrupoles = []  # 9 components per atom  
+    dipoles = []  # 3 components per atom
+    quadrupoles = []  # 9 components per atom
     axis_types = []
     multipole_atom_z = []  # Z-axis defining atom indices
     multipole_atom_x = []  # X-axis defining atom indices  
@@ -106,89 +107,28 @@ def compute_multipole_energy(
         # Column 17: thole parameter
         # Column 18: damping factor
         # Column 19: polarizability
-        
-        # Extract charges (always column 0)
+
         charges.append(topology_parameters[:n_particles, 0].repeat(n_copies))
-        
-        # Extract molecular dipoles (columns 1-3, default to zero if not present)
-        if n_params > 3:
-            dipoles = topology_parameters[:n_particles, 1:4].repeat(n_copies, 1)
-        else:
-            dipoles = torch.zeros((n_particles * n_copies, 3), dtype=topology_parameters.dtype)
-        molecular_dipoles.append(dipoles)
-        
-        # Extract molecular quadrupoles (columns 4-12, default to zero if not present)
-        if n_params > 12:
-            quadrupoles = topology_parameters[:n_particles, 4:13].repeat(n_copies, 1)
-        else:
-            quadrupoles = torch.zeros((n_particles * n_copies, 9), dtype=topology_parameters.dtype)
-        molecular_quadrupoles.append(quadrupoles)
-        
-        # Extract axis types (column 13, default to 0 = NoAxisType)
-        if n_params > 13:
-            axis_types.append(topology_parameters[:n_particles, 13].repeat(n_copies).int())
-        else:
-            axis_types.append(torch.zeros(n_particles * n_copies, dtype=torch.int32))
-            
-        # Extract multipole defining atom indices (columns 14-16, default to -1 = not defined)
-        if n_params > 16:
-            multipole_atom_z.append(topology_parameters[:n_particles, 14].repeat(n_copies).int())
-            multipole_atom_x.append(topology_parameters[:n_particles, 15].repeat(n_copies).int())
-            multipole_atom_y.append(topology_parameters[:n_particles, 16].repeat(n_copies).int())
-        else:
-            multipole_atom_z.append(torch.full((n_particles * n_copies,), -1, dtype=torch.int32))
-            multipole_atom_x.append(torch.full((n_particles * n_copies,), -1, dtype=torch.int32))
-            multipole_atom_y.append(torch.full((n_particles * n_copies,), -1, dtype=torch.int32))
-            
-        # Extract Thole parameters (column 17, default to 0.39)
-        if n_params > 17:
-            thole_params.append(topology_parameters[:n_particles, 17].repeat(n_copies))
-        else:
-            thole_params.append(torch.full((n_particles * n_copies,), 0.39, dtype=topology_parameters.dtype))
-            
-        # Extract damping factors (column 18, fallback to derived from polarizability)
-        if n_params > 18:
-            damping_factors.append(topology_parameters[:n_particles, 18].repeat(n_copies))
-        else:
-            # Will compute from polarizability below
-            damping_factors.append(None)
-            
-        # Extract polarizabilities (column 19, fallback to column 1 for backwards compatibility)
-        if n_params > 19:
-            polarizabilities.append(topology_parameters[:n_particles, 19].repeat(n_copies))
-        elif n_params > 1:
-            # Backwards compatibility: polarizability in column 1
-            polarizabilities.append(topology_parameters[:n_particles, 1].repeat(n_copies))
-        else:
-            polarizabilities.append(torch.zeros(n_particles * n_copies, dtype=topology_parameters.dtype))
+        dipoles.append(topology_parameters[n_particles:, 1:4].repeat(n_copies, 1))
+        quadrupoles.append(topology_parameters[n_particles:, 4:13].repeat(n_copies, 1))
+        axis_types.append(topology_parameters[n_particles:, 13].repeat(n_copies).int())
+        multipole_atom_z.append(topology_parameters[n_particles:, 14].repeat(n_copies).int())
+        multipole_atom_x.append(topology_parameters[n_particles:, 15].repeat(n_copies).int())
+        multipole_atom_y.append(topology_parameters[n_particles:, 16].repeat(n_copies).int())
+        thole_params.append(topology_parameters[n_particles:, 17].repeat(n_copies))
+        damping_factors.append(topology_parameters[n_particles:, 18].repeat(n_copies))
+        polarizabilities.append(topology_parameters[n_particles:, 19].repeat(n_copies))
 
     # Concatenate all parameter lists
-    charges = torch.cat(charges)
-    molecular_dipoles = torch.cat(molecular_dipoles)  # Shape: (n_total_particles, 3)
-    molecular_quadrupoles = torch.cat(molecular_quadrupoles)  # Shape: (n_total_particles, 9)
-    axis_types = torch.cat(axis_types)
-    multipole_atom_z = torch.cat(multipole_atom_z)
-    multipole_atom_x = torch.cat(multipole_atom_x)
-    multipole_atom_y = torch.cat(multipole_atom_y)
-    thole_params = torch.cat(thole_params)
-    polarizabilities = torch.cat(polarizabilities)
-    
-    # Handle damping factors - for backwards compatibility with existing tests
-    # that don't provide full AMOEBA parameters, check if we have them
-    if any(df is not None for df in damping_factors):
-        # At least some topologies provide damping factors
-        final_damping_factors = []
-        for i, df in enumerate(damping_factors):
-            if df is not None:
-                final_damping_factors.append(df)
-            else:
-                # Compute from polarizabilities for missing ones
-                pol_slice = polarizabilities[i]
-                final_damping_factors.append(pol_slice ** (1.0/6.0))
-        damping_factors = torch.cat(final_damping_factors)
-    else:
-        # No damping factors provided, compute all from polarizabilities
-        damping_factors = polarizabilities ** (1.0/6.0)
+    charges = torch.cat(charges)  # Shape: (n_total_particles,)
+    dipoles = torch.cat(dipoles)  # Shape: (n_total_particles, 3)
+    quadrupoles = torch.cat(quadrupoles)  # Shape: (n_total_particles, 9)
+    axis_types = torch.cat(axis_types)  # Shape: (n_total_particles,)
+    multipole_atom_z = torch.cat(multipole_atom_z)  # Shape: (n_total_particles,)
+    multipole_atom_x = torch.cat(multipole_atom_x)  # Shape: (n_total_particles,)
+    multipole_atom_y = torch.cat(multipole_atom_y)  # Shape: (n_total_particles,)
+    thole_params = torch.cat(thole_params)  # Shape: (n_total_particles,)
+    polarizabilities = torch.cat(polarizabilities)  # Shape: (n_total_particles,)
 
     pair_scales = compute_pairwise_scales(system, potential)
 
@@ -257,7 +197,10 @@ def compute_multipole_energy(
 
         coul_energy = energy_direct + energy_recip + energy_exclusion
 
+    print(f"DEBUG: Polarizabilities check - all zero? {torch.allclose(polarizabilities, torch.tensor(0.0, dtype=torch.float64))}")
+    print(f"DEBUG: Polarizabilities: {polarizabilities}")
     if torch.allclose(polarizabilities, torch.tensor(0.0, dtype=torch.float64)):
+        print("DEBUG: Returning early - all polarizabilities are zero!")
         return coul_energy
 
     # Handle batch vs single conformer - process each conformer individually
@@ -293,12 +236,9 @@ def compute_multipole_energy(
     for distance, delta, idx, scale in zip(
         pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
     ):
-        # Compute damping parameter u using explicit damping factors
-        dmp = damping_factors[idx[0]] * damping_factors[idx[1]]
-        u = distance / dmp if dmp > 1e-10 else distance * 1e10
-
         # Use atom-specific Thole parameters (minimum of the two atoms, per AMOEBA)
         a = torch.min(thole_params[idx[0]], thole_params[idx[1]])
+        u = distance / a
         au3 = a * u**3
         exp_au3 = torch.exp(-au3)
 
@@ -335,12 +275,9 @@ def compute_multipole_energy(
         for distance, delta, idx, scale in zip(
             pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
         ):
-            # Compute damping parameter u using explicit damping factors
-            dmp = damping_factors[idx[0]] * damping_factors[idx[1]]
-            u = distance / dmp if dmp > 1e-10 else distance * 1e10
-
             # Use atom-specific Thole parameters (minimum of the two atoms, per AMOEBA)
             a = torch.min(thole_params[idx[0]], thole_params[idx[1]])
+            u = distance / a
             au3 = a * u**3
             exp_au3 = torch.exp(-au3)
             damping_term1 = 1 - exp_au3
@@ -360,11 +297,7 @@ def compute_multipole_energy(
         # ind_dipoles is already μ^(0) = α * E, so no additional work needed
         pass
     elif polarization_type == "extrapolated":
-        # Extrapolated polarization using OPT method with SCF iteration snapshots
-        # Default to OPT3 coefficients if not provided
         if extrapolation_coefficients is None:
-            # OPT3 coefficients from Rackers et al.
-            # Note: These sum to 0.995 ≈ 1.0 for energy conservation
             extrapolation_coefficients = [-0.154, 0.017, 0.657, 0.475]
         
         opt_coeffs = torch.tensor(extrapolation_coefficients, dtype=torch.float64, device=conformer.device)
@@ -436,6 +369,12 @@ def compute_multipole_energy(
 
     # Reshape induced dipoles back to (N, 3) for energy calculations
     ind_dipoles_3d = ind_dipoles.reshape(system.n_particles, 3)
+    
+    # DEBUG: Print induced dipoles for comparison
+    print(f"\nSMEE induced dipoles (e·Å):")
+    for i in range(system.n_particles):
+        dipole = ind_dipoles_3d[i].tolist()
+        print(f"  Particle {i}: [{dipole[0]:.10f}, {dipole[1]:.10f}, {dipole[2]:.10f}]")
 
     # Calculate polarization energy based on method
     if polarization_type == "direct" or polarization_type == "extrapolated":
@@ -456,12 +395,9 @@ def compute_multipole_energy(
         for distance, delta, idx, scale in zip(
             pairwise.distances, pairwise.deltas, pairwise.idxs, pair_scales
         ):
-            # Compute damping parameter u using explicit damping factors
-            dmp = damping_factors[idx[0]] * damping_factors[idx[1]]
-            u = distance / dmp if dmp > 1e-10 else distance * 1e10
-
             # Use atom-specific Thole parameters (minimum of the two atoms, per AMOEBA)
             a = torch.min(thole_params[idx[0]], thole_params[idx[1]])
+            u = distance / a
             au3 = a * u**3
             exp_au3 = torch.exp(-au3)
             damping_term1 = 1 - exp_au3

@@ -616,11 +616,11 @@ def convert_multipole_potential(
             for idx, parameter in enumerate(parameters):
                 omm_idx = idx % topology.n_particles + idx_offset
                 omm_params = force.getMultipoleParameters(omm_idx)
-                if idx // topology.n_atoms == 0:
+                if idx < topology.n_particles:
                     omm_params[0] = parameter[0] * openmm.unit.elementary_charge
                 else:
-                    omm_params[8] = (parameter[1] / 1000) ** (1 / 6)
-                    omm_params[9] = parameter[1] * _ANGSTROM**3
+                    omm_params[8] = (parameter[19] / 1000) ** (1/6)
+                    omm_params[9] = parameter[19] * _ANGSTROM**3
                 force.setMultipoleParameters(omm_idx, *omm_params)
 
             covalent_maps = {}

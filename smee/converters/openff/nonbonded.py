@@ -358,6 +358,8 @@ def convert_multipole(
     parameters_chg = torch.cat(
         (potential_chg.parameters, torch.zeros(potential_chg.parameters.shape[0], n_pol_cols, dtype=potential_chg.parameters.dtype)), dim=1
     )
+    parameters_pol = potential_pol.parameters
+    parameters_pol[:, 17] = parameters_pol[:, 18]**(1/6)
     # Pad polarizability parameters with zeros for the charge columns
     parameters_pol = torch.cat(
         (torch.zeros(potential_pol.parameters.shape[0], n_chg_cols, dtype=potential_pol.parameters.dtype), potential_pol.parameters), dim=1
