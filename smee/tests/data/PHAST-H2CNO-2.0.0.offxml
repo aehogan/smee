@@ -348,7 +348,7 @@
         <Atom smirks="[#15:1]" id="d_p" rho="4.074281 * angstrom" beta="4.018553 * angstrom**-1" c6="6.658994e-03 * kilojoule_per_mole * nanometer**6" c8="5.384740e-04 * kilojoule_per_mole * nanometer**8" c10="5.666673e-05 * kilojoule_per_mole * nanometer**10"></Atom>
         <Atom smirks="[#14:1]" id="d_si" rho="4.066740 * angstrom" beta="3.385986 * angstrom**-1" c6="6.052399e-03 * kilojoule_per_mole * nanometer**6" c8="4.637977e-04 * kilojoule_per_mole * nanometer**8" c10="4.752880e-05 * kilojoule_per_mole * nanometer**10"></Atom>
     </DampedExp6810>
-    <Electrostatics version="0.3" scale12="0.0" scale13="0.0" scale14="0.0" scale15="1.0" cutoff="0.9 * nanometer" switch_width="0.0 * angstrom" method="PME"></Electrostatics>
+    <Electrostatics version="0.3" scale12="0.0" scale13="0.0" scale14="0.4" scale15="1.0" cutoff="0.9 * nanometer" switch_width="0.0 * angstrom" method="PME"></Electrostatics>
     <LibraryCharges version="0.3">
         <LibraryCharge smirks="[#3+1:1]" charge1="1.0 * elementary_charge" name="Li+"></LibraryCharge>
         <LibraryCharge smirks="[#11+1:1]" charge1="1.0 * elementary_charge" name="Na+"></LibraryCharge>

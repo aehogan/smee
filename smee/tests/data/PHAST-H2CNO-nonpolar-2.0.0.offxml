@@ -348,7 +348,7 @@
         <Atom smirks="[#15:1]" id="d_p" rho="4.072343 * angstrom" beta="4.029604 * angstrom**-1" c6="6.658994e-03 * kilojoule_per_mole * nanometer**6" c8="5.384740e-04 * kilojoule_per_mole * nanometer**8" c10="5.666673e-05 * kilojoule_per_mole * nanometer**10"></Atom>
         <Atom smirks="[#14:1]" id="d_si" rho="4.065619 * angstrom" beta="3.407714 * angstrom**-1" c6="6.052399e-03 * kilojoule_per_mole * nanometer**6" c8="4.637977e-04 * kilojoule_per_mole * nanometer**8" c10="4.752880e-05 * kilojoule_per_mole * nanometer**10"></Atom>
     </DampedExp6810>
-    <Electrostatics version="0.3" scale12="0.0" scale13="0.0" scale14="0.5" scale15="1.0" cutoff="0.9 * nanometer" switch_width="0.0 * angstrom" method="PME"></Electrostatics>
+    <Electrostatics version="0.3" scale12="0.0" scale13="0.0" scale14="0.4" scale15="1.0" cutoff="0.9 * nanometer" switch_width="0.0 * angstrom" method="PME"></Electrostatics>
     <LibraryCharges version="0.3">
         <LibraryCharge smirks="[#3+1:1]" charge1="1.0 * elementary_charge" name="Li+"></LibraryCharge>
         <LibraryCharge smirks="[#11+1:1]" charge1="1.0 * elementary_charge" name="Na+"></LibraryCharge>
@@ -366,5 +366,22 @@
         <LibraryCharge smirks="[#54:1]" charge1="0.0 * elementary_charge" name="Xe"></LibraryCharge>
     </LibraryCharges>
     <ToolkitAM1BCC version="0.3"></ToolkitAM1BCC>
+    <Multipole version="0.3" polarization_type="extrapolated" cutoff="0.9 * nanometer">
+        <Atom smirks="[#1:1]" id="m_h" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#1:1]-[#7,#8,#9,#17,#35]" id="m_hpolar" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#6:1]" id="m_c" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#7:1]" id="m_n" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#8:1]" id="m_o" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#16:1]" id="m_s" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#9:1]" id="m_f" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#17:1]" id="m_cl" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#2:1]" id="m_he" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#10:1]" id="m_ne" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#18:1]" id="m_ar" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#36:1]" id="m_kr" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#54:1]" id="m_xe" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#5:1]" id="m_b" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#15:1]" id="m_p" polarity="0 * angstrom**3"></Atom>
+        <Atom smirks="[#14:1]" id="m_si" polarity="0 * angstrom**3"></Atom>
+    </Multipole>
 </SMIRNOFF>
-

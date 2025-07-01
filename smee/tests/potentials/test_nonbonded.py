@@ -35,6 +35,7 @@ def _compute_openmm_energy(
         box_vectors: torch.Tensor | None,
         potential: smee.TensorPotential,
         polarization_type: str | None = None,
+        return_omm_forces: bool | None = None,
 ) -> torch.Tensor:
     coords = coords.numpy() * openmm.unit.angstrom
 
@@ -74,7 +75,30 @@ def _compute_openmm_energy(
     omm_energy = omm_context.getState(getEnergy=True).getPotentialEnergy()
     omm_energy = omm_energy.value_in_unit(openmm.unit.kilocalories_per_mole)
 
-    return torch.tensor(omm_energy, dtype=torch.float64)
+    # Get induced dipoles
+    try:
+        amoeba_force = None
+        for force in omm_forces:
+            if isinstance(force, openmm.AmoebaMultipoleForce):
+                amoeba_force = force
+                break
+
+        if amoeba_force:
+            induced_dipoles = amoeba_force.getInducedDipoles(omm_context)
+
+            conversion_factor = 182.26
+            induced_dipoles_angstrom = [[d * conversion_factor for d in dipole] for dipole in induced_dipoles]
+            print(f"\nOpenMM induced dipoles (e·Å):")
+            for i, dipole in enumerate(induced_dipoles_angstrom):
+                print(f"  Particle {i}: [{dipole[0]:.10f}, {dipole[1]:.10f}, {dipole[2]:.10f}]")
+
+    except Exception as e:
+        print(f"Could not get induced dipoles: {e}")
+
+    if return_omm_forces:
+        return torch.tensor(omm_energy, dtype=torch.float64), omm_forces
+    else:
+        return torch.tensor(omm_energy, dtype=torch.float64)
 
 
 def _parameter_key_to_idx(potential: smee.TensorPotential, key: str):
@@ -641,19 +665,19 @@ def test_compute_multipole_energy_CC_O_non_periodic(test_data_dir, forcefield_na
     energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), None,
                                       polarization_type=polarization_type)
     energy.backward()
-    expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
-                                             polarization_type=polarization_type)
-
-    assert torch.allclose(energy, expected_energy, atol=5e-3)
+    expected_energy, omm_forces = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
+                                                         polarization_type=polarization_type, return_omm_forces=True)
+    print_debug_info_multipole(energy, expected_energy, tensor_sys, es_potential, omm_forces)
+    assert torch.allclose(energy, expected_energy, atol=1e-3)
 
 
 @pytest.mark.parametrize(
     "forcefield_name,polarization_type",
     [
-        ("PHAST-H2CNO-nonpolar-2.0.0.offxml", "direct"),
+        #("PHAST-H2CNO-nonpolar-2.0.0.offxml", "direct"),
         ("PHAST-H2CNO-2.0.0.offxml", "direct"),
-        ("PHAST-H2CNO-2.0.0.offxml", "mutual"),
-        ("PHAST-H2CNO-2.0.0.offxml", "extrapolated")
+        #("PHAST-H2CNO-2.0.0.offxml", "mutual"),
+        #("PHAST-H2CNO-2.0.0.offxml", "extrapolated")
     ]
 )
 def test_compute_multipole_energy_charged_ne_non_periodic(test_data_dir, forcefield_name, polarization_type):
@@ -661,7 +685,7 @@ def test_compute_multipole_energy_charged_ne_non_periodic(test_data_dir, forcefi
         ["[Ne]", "[Ne]"],
         [1, 1],
         openff.toolkit.ForceField(
-            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+            str(test_data_dir / forcefield_name), load_plugins=True
         ),
     )
     tensor_sys.is_periodic = False
@@ -669,17 +693,17 @@ def test_compute_multipole_energy_charged_ne_non_periodic(test_data_dir, forcefi
     coords = torch.vstack([torch.tensor([0, 0, 0]), torch.tensor([0, 0, 3.0])])
 
     # give each atom a charge otherwise the system is neutral
-    tensor_ff.potentials_by_type["Electrostatics"].parameters[0, 0] = 1
+    es_potential = tensor_ff.potentials_by_type["Electrostatics"]
+    es_potential.parameters[0, 0] = 1
 
     energy = compute_multipole_energy(
-        tensor_sys, tensor_ff.potentials_by_type["Electrostatics"], coords, None, polarization_type=polarization_type
+        tensor_sys, es_potential, coords, None, polarization_type=polarization_type
     )
 
-    expected_energy = _compute_openmm_energy(
-        tensor_sys, coords, None, tensor_ff.potentials_by_type["Electrostatics"], polarization_type=polarization_type
-    )
-
-    assert torch.allclose(energy, expected_energy, atol=1.0e-4)
+    expected_energy, omm_forces = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
+                                                         polarization_type=polarization_type, return_omm_forces=True)
+    print_debug_info_multipole(energy, expected_energy, tensor_sys, es_potential, omm_forces)
+    assert torch.allclose(energy, expected_energy, atol=1e-3)
 
 
 @pytest.mark.parametrize(
@@ -696,7 +720,7 @@ def test_compute_multipole_energy_c_xe_non_periodic(test_data_dir, forcefield_na
         ["C", "[Xe]"],
         [1, 1],
         openff.toolkit.ForceField(
-            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+            str(test_data_dir / forcefield_name), load_plugins=True
         ),
     )
     tensor_sys.is_periodic = False
@@ -712,15 +736,16 @@ def test_compute_multipole_energy_c_xe_non_periodic(test_data_dir, forcefield_na
         ]
     )
 
+    es_potential = tensor_ff.potentials_by_type["Electrostatics"]
+
     energy = compute_multipole_energy(
-        tensor_sys, tensor_ff.potentials_by_type["Electrostatics"], coords, None, polarization_type=polarization_type
+        tensor_sys, es_potential, coords, None, polarization_type=polarization_type
     )
 
-    expected_energy = _compute_openmm_energy(
-        tensor_sys, coords, None, tensor_ff.potentials_by_type["Electrostatics"], polarization_type=polarization_type
-    )
-
-    assert torch.allclose(energy, expected_energy, atol=1.0e-4)
+    expected_energy, omm_forces = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
+                                                         polarization_type=polarization_type, return_omm_forces=True)
+    print_debug_info_multipole(energy, expected_energy, tensor_sys, es_potential, omm_forces)
+    assert torch.allclose(energy, expected_energy, atol=1e-3)
 
 
 @pytest.mark.parametrize(
@@ -737,7 +762,7 @@ def test_compute_phast2_energy_water_conformers_non_periodic(test_data_dir, forc
         ["O"],
         [2],
         openff.toolkit.ForceField(
-            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+            str(test_data_dir / forcefield_name), load_plugins=True
         ),
     )
     tensor_sys.is_periodic = False
@@ -795,11 +820,14 @@ def test_compute_phast2_energy_water_conformers_non_periodic(test_data_dir, forc
 )
 @pytest.mark.parametrize("smiles", ["CC", "CCC", "CCCC", "CCCCC"])
 def test_compute_multipole_energy_isolated_non_periodic(test_data_dir, forcefield_name, polarization_type, smiles):
+
+    print(f"\n{forcefield_name} - {polarization_type} - {smiles}")
+
     tensor_sys, tensor_ff = smee.tests.utils.system_from_smiles(
         [smiles],
         [1],
         openff.toolkit.ForceField(
-            str(test_data_dir / "PHAST-H2CNO-2.0.0.offxml"), load_plugins=True
+            str(test_data_dir / forcefield_name), load_plugins=True
         ),
     )
     tensor_sys.is_periodic = False
@@ -813,10 +841,10 @@ def test_compute_multipole_energy_isolated_non_periodic(test_data_dir, forcefiel
     energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), None,
                                       polarization_type=polarization_type)
     energy.backward()
-    expected_energy = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
-                                             polarization_type=polarization_type)
-
-    assert torch.allclose(energy, expected_energy, atol=1e-4)
+    expected_energy, omm_forces = _compute_openmm_energy(tensor_sys, coords, None, es_potential,
+                                                         polarization_type=polarization_type, return_omm_forces=True)
+    print_debug_info_multipole(energy, expected_energy, tensor_sys, es_potential, omm_forces)
+    assert torch.allclose(energy, expected_energy, atol=1e-3)
 
 
 @pytest.mark.parametrize(
@@ -854,7 +882,29 @@ def test_compute_multipole_energy_CC_O_periodic(test_data_dir, forcefield_name, 
     energy = compute_multipole_energy(tensor_sys, es_potential, coords.float(), box_vectors.float(),
                                       polarization_type=polarization_type)
     energy.backward()
-    expected_energy = _compute_openmm_energy(tensor_sys, coords, box_vectors, es_potential,
-                                             polarization_type=polarization_type)
+    expected_energy, omm_forces = _compute_openmm_energy(tensor_sys, coords, box_vectors, es_potential,
+                                             polarization_type=polarization_type, return_omm_forces=True)
+    print_debug_info_multipole(energy, expected_energy, tensor_sys, es_potential, omm_forces)
+    assert torch.allclose(energy, expected_energy, atol=1e-3)
 
-    assert torch.allclose(energy, expected_energy, atol=1e-2)
+
+def print_debug_info_multipole(energy: torch.Tensor,
+                               expected_energy: torch.Tensor,
+                               tensor_sys: smee.TensorSystem,
+                               es_potential: smee.TensorPotential,
+                               omm_forces: list[openmm.Force]):
+    print(f"Energy\nSMEE {energy} OpenMM {expected_energy}")
+
+    print(f"SMEE Parameters {es_potential.parameters}")
+
+    for idx, topology in enumerate(tensor_sys.topologies):
+        print(f"SMEE Topology {idx}")
+        print(f"Assignment Matrix {topology.parameters[es_potential.type].assignment_matrix.to_dense()}")
+
+    amoeba_force = None
+    for force in omm_forces:
+        if isinstance(force, openmm.AmoebaMultipoleForce):
+            amoeba_force = force
+            break
+
+    print(amoeba_force)

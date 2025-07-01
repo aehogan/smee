@@ -22,9 +22,9 @@ _T = typing.TypeVar("_T", bound=openmm.NonbondedForce | openmm.CustomNonbondedFo
 
 
 def _create_nonbonded_force(
-    potential: smee.TensorPotential,
-    system: smee.TensorSystem,
-    cls: typing.Type[_T] = openmm.NonbondedForce,
+        potential: smee.TensorPotential,
+        system: smee.TensorSystem,
+        cls: typing.Type[_T] = openmm.NonbondedForce,
 ) -> _T:
     """Create a non-bonded force for a given potential and system, making sure to set
     the appropriate method and cutoffs."""
@@ -71,10 +71,10 @@ def _create_nonbonded_force(
 
 
 def _eval_mixing_fn(
-    potential: smee.TensorPotential,
-    mixing_fn: dict[str, str],
-    param_1: torch.Tensor,
-    param_2: torch.Tensor,
+        potential: smee.TensorPotential,
+        mixing_fn: dict[str, str],
+        param_1: torch.Tensor,
+        param_2: torch.Tensor,
 ) -> dict[str, float]:
     import symengine
 
@@ -96,8 +96,8 @@ def _eval_mixing_fn(
 
 
 def _build_vdw_lookup(
-    potential: smee.TensorPotential,
-    mixing_fn: dict[str, str],
+        potential: smee.TensorPotential,
+        mixing_fn: dict[str, str],
 ) -> dict[str, list[float]]:
     """Build the ``n_param x n_param`` vdW parameter lookup table containing
     parameters for all interactions.
@@ -155,7 +155,7 @@ def _prepend_scale_to_energy_fn(fn: str, scale_var: str = _INTRA_SCALE_VAR) -> s
 
 
 def _detect_parameters(
-    potential: smee.TensorPotential, energy_fn: str, mixing_fn: dict[str, str]
+        potential: smee.TensorPotential, energy_fn: str, mixing_fn: dict[str, str]
 ) -> tuple[list[str], list[str]]:
     """Detect the required parameters and attributes for a given energy function
     and associated mixing rules."""
@@ -209,7 +209,7 @@ def _detect_parameters(
 
 
 def _extract_parameters(
-    potential: smee.TensorPotential, parameter: torch.Tensor, cols: list[str]
+        potential: smee.TensorPotential, parameter: torch.Tensor, cols: list[str]
 ) -> list[float]:
     """Extract the values of a subset of parameters from a parameter tensor."""
 
@@ -230,13 +230,13 @@ def _extract_parameters(
 
 
 def _add_parameters_to_vdw_without_lookup(
-    potential: smee.TensorPotential,
-    system: smee.TensorSystem,
-    energy_fn: str,
-    mixing_fn: dict[str, str],
-    inter_force: openmm.CustomNonbondedForce,
-    intra_force: openmm.CustomBondForce,
-    used_parameters: list[str],
+        potential: smee.TensorPotential,
+        system: smee.TensorSystem,
+        energy_fn: str,
+        mixing_fn: dict[str, str],
+        inter_force: openmm.CustomNonbondedForce,
+        intra_force: openmm.CustomBondForce,
+        used_parameters: list[str],
 ):
     """Add parameters to a vdW force directly, i.e. without using a lookup table."""
 
@@ -292,12 +292,12 @@ def _add_parameters_to_vdw_without_lookup(
 
 
 def _add_parameters_to_vdw_with_lookup(
-    potential: smee.TensorPotential,
-    system: smee.TensorSystem,
-    energy_fn: str,
-    mixing_fn: dict[str, str],
-    inter_force: openmm.CustomNonbondedForce,
-    intra_force: openmm.CustomBondForce,
+        potential: smee.TensorPotential,
+        system: smee.TensorSystem,
+        energy_fn: str,
+        mixing_fn: dict[str, str],
+        inter_force: openmm.CustomNonbondedForce,
+        intra_force: openmm.CustomBondForce,
 ):
     """Add parameters to a vdW force, explicitly defining all pairwise parameters
     using a lookup table."""
@@ -356,10 +356,10 @@ def _add_parameters_to_vdw_with_lookup(
 
 
 def convert_custom_vdw_potential(
-    potential: smee.TensorPotential,
-    system: smee.TensorSystem,
-    energy_fn: str,
-    mixing_fn: dict[str, str],
+        potential: smee.TensorPotential,
+        system: smee.TensorSystem,
+        energy_fn: str,
+        mixing_fn: dict[str, str],
 ) -> tuple[openmm.CustomNonbondedForce, openmm.CustomBondForce]:
     """Converts an arbitrary vdW potential to OpenMM forces.
 
@@ -444,7 +444,7 @@ def convert_custom_vdw_potential(
     smee.PotentialType.VDW, smee.EnergyFn.VDW_LJ
 )
 def convert_lj_potential(
-    potential: smee.TensorPotential, system: smee.TensorSystem
+        potential: smee.TensorPotential, system: smee.TensorSystem
 ) -> openmm.NonbondedForce | list[openmm.CustomNonbondedForce | openmm.CustomBondForce]:
     """Convert a Lennard-Jones potential to an OpenMM force.
 
@@ -501,7 +501,7 @@ def convert_lj_potential(
     smee.PotentialType.VDW, smee.EnergyFn.VDW_DEXP
 )
 def convert_dexp_potential(
-    potential: smee.TensorPotential, system: smee.TensorSystem
+        potential: smee.TensorPotential, system: smee.TensorSystem
 ) -> tuple[openmm.CustomNonbondedForce, openmm.CustomBondForce]:
     """Convert a DEXP potential to OpenMM forces.
 
@@ -530,7 +530,7 @@ def convert_dexp_potential(
     smee.PotentialType.VDW, smee.EnergyFn.VDW_DAMPEDEXP6810
 )
 def convert_dampedexp6810_potential(
-    potential: smee.TensorPotential, system: smee.TensorSystem
+        potential: smee.TensorPotential, system: smee.TensorSystem
 ) -> tuple[openmm.CustomNonbondedForce, openmm.CustomBondForce]:
     """Convert a DampedExp6810 potential to OpenMM forces.
 
@@ -570,7 +570,7 @@ def convert_dampedexp6810_potential(
     smee.PotentialType.ELECTROSTATICS, smee.EnergyFn.POLARIZATION
 )
 def convert_multipole_potential(
-    potential: smee.TensorPotential, system: smee.TensorSystem
+        potential: smee.TensorPotential, system: smee.TensorSystem
 ) -> openmm.AmoebaMultipoleForce:
     """Convert a Multipole potential to OpenMM forces."""
 
@@ -619,17 +619,25 @@ def convert_multipole_potential(
                 if idx < topology.n_particles:
                     omm_params[0] = parameter[0] * openmm.unit.elementary_charge
                 else:
-                    omm_params[8] = (parameter[19] / 1000) ** (1/6)
-                    omm_params[9] = parameter[19] * _ANGSTROM**3
+                    omm_params[8] = (parameter[19] / 1000) ** (1 / 6)
+                    omm_params[9] = parameter[19] * _ANGSTROM ** 3
                 force.setMultipoleParameters(omm_idx, *omm_params)
 
-            covalent_maps = {}
+            covalent_12_13_maps = {}
+            covalent_14_maps = {}
+            covalent_pol_maps = {}
 
             for (i, j), scale_idx in zip(parameter_map.exclusions, parameter_map.exclusion_scale_idxs):
-                if scale_idx == 3: # Don't exclude 1-5 interactions
+                if scale_idx == 3:  # Don't exclude 1-5 interactions
                     continue
+                elif scale_idx == 2:  # 1-4 interactions
+                    covalent_maps = covalent_14_maps
+                else:
+                    covalent_maps = covalent_12_13_maps
+
                 i = int(i) + idx_offset
                 j = int(j) + idx_offset
+
                 if i in covalent_maps.keys():
                     covalent_maps[i].append(j)
                 else:
@@ -639,14 +647,30 @@ def convert_multipole_potential(
                 else:
                     covalent_maps[j] = [i]
 
-            for i in covalent_maps.keys():
+                if i in covalent_pol_maps.keys():
+                    covalent_pol_maps[i].append(j)
+                else:
+                    covalent_pol_maps[i] = [j]
+                if j in covalent_pol_maps.keys():
+                    covalent_pol_maps[j].append(i)
+                else:
+                    covalent_pol_maps[j] = [i]
+
+            for i in covalent_12_13_maps.keys():
                 force.setCovalentMap(
-                    i, openmm.AmoebaMultipoleForce.Covalent12, covalent_maps[i]
+                    i, openmm.AmoebaMultipoleForce.Covalent12, covalent_12_13_maps[i]
                 )
+
+            for i in covalent_14_maps.keys():
+                force.setCovalentMap(
+                    i, openmm.AmoebaMultipoleForce.Covalent14, covalent_14_maps[i]
+                )
+
+            for i in covalent_pol_maps.keys():
                 force.setCovalentMap(
                     i,
                     openmm.AmoebaMultipoleForce.PolarizationCovalent11,
-                    covalent_maps[i],
+                    covalent_pol_maps[i],
                 )
 
             idx_offset += topology.n_particles
@@ -658,7 +682,7 @@ def convert_multipole_potential(
     smee.PotentialType.ELECTROSTATICS, smee.EnergyFn.COULOMB
 )
 def convert_coulomb_potential(
-    potential: smee.TensorPotential, system: smee.TensorSystem
+        potential: smee.TensorPotential, system: smee.TensorSystem
 ) -> openmm.NonbondedForce:
     """Convert a Coulomb potential to an OpenMM force."""
     force = _create_nonbonded_force(potential, system)
